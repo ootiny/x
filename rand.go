@@ -1,11 +1,17 @@
 package x
 
 import (
+	"encoding/base64"
 	"math/rand"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
-// letters is the character set used for random string generation
-const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+func UUID() string {
+	raw := uuid.New()
+	return base64.RawURLEncoding.EncodeToString(raw[:])
+}
 
 func RandInt(args ...int) int {
 	if len(args) == 0 {
@@ -81,15 +87,32 @@ func RandBool() bool {
 	return rand.Intn(2) == 0
 }
 
-// RandString generates a random string of the specified length.
-// If length is less than 0, it will return an empty string.
 func RandString(length int) string {
 	if length <= 0 {
 		return ""
 	}
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+
+	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const letterIdxBits = 6
+	const letterIdxMask = 1<<letterIdxBits - 1
+	const letterIdxMax = 63 / letterIdxBits
+
+	var sb strings.Builder
+	sb.Grow(length)
+
+	for i, cache, remain := 0, rand.Int63(), letterIdxMax; i < length; {
+		if remain == 0 {
+			cache, remain = rand.Int63(), letterIdxMax
+		}
+
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			sb.WriteByte(letterBytes[idx])
+			i++
+		}
+
+		cache >>= letterIdxBits
+		remain--
 	}
-	return string(b)
+
+	return sb.String()
 }
