@@ -6,6 +6,20 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	PanicLevel = log.PanicLevel
+	FatalLevel = log.FatalLevel
+	ErrorLevel = log.ErrorLevel
+	WarnLevel  = log.WarnLevel
+	InfoLevel  = log.InfoLevel
+	DebugLevel = log.DebugLevel
+	TraceLevel = log.TraceLevel
+)
+
+func SetLogLevel(level log.Level) {
+	log.SetLevel(level)
+}
+
 // LogTrace logs a message at level Trace on the standard logger.
 func LogTrace(args ...any) {
 	log.Trace(args...)
