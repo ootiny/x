@@ -106,7 +106,7 @@ func runCommand(command string, option *commandOption) (string, error) {
 	return outputBuf.String(), retError
 }
 
-func XCommand(command string) (string, error) {
+func Command(command string) (string, error) {
 	return runCommand(command, &commandOption{
 		Stdout:       os.Stdout,
 		Stderr:       os.Stderr,
@@ -115,7 +115,7 @@ func XCommand(command string) (string, error) {
 	})
 }
 
-func XSudoCommand(command string, password string) (string, error) {
+func SudoCommand(command string, password string) (string, error) {
 	return runCommand(command, &commandOption{
 		Stdout:       os.Stdout,
 		Stderr:       os.Stderr,
