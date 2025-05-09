@@ -36,19 +36,17 @@ func runCommand(command string, option *commandOption) (string, error) {
 		cmd = exec.Command(parts[0], parts[1:]...)
 	}
 
-	// 获取 StdinPipe 用于写入密码
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return "", fmt.Errorf("error creating stdin pipe for sudo: %v", err)
+		return "", Errorf("error creating stdin pipe: %v", err)
 	}
-	// 获取 StdoutPipe 和 StderrPipe
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("error creating stdout pipe for sudo: %v", err)
+		return "", Errorf("error creating stdout pipe: %v", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return "", fmt.Errorf("error creating stderr pipe for sudo: %v", err)
+		return "", Errorf("error creating stderr pipe: %v", err)
 	}
 
 	var outputBuf bytes.Buffer
@@ -58,15 +56,15 @@ func runCommand(command string, option *commandOption) (string, error) {
 		return "", fmt.Errorf("error starting sudo command: %v", err)
 	}
 
-	results := make(chan error)
+	errorCHan := make(chan error, 3)
 
 	go func() {
 		defer stdin.Close()
 		if option.Sudo && option.SudoPassword != "" {
 			_, err := io.WriteString(stdin, option.SudoPassword+"\n") // 发送密码并加换行符
-			results <- err
+			errorCHan <- err
 		} else {
-			results <- nil
+			errorCHan <- nil
 		}
 	}()
 
@@ -80,7 +78,7 @@ func runCommand(command string, option *commandOption) (string, error) {
 			}
 			outputBuf.WriteString(line + "\n")
 		}
-		results <- scanner.Err()
+		errorCHan <- scanner.Err()
 	}()
 
 	go func() {
@@ -93,17 +91,19 @@ func runCommand(command string, option *commandOption) (string, error) {
 			}
 			outputBuf.WriteString(line + "\n")
 		}
-		results <- scanner.Err()
+		errorCHan <- scanner.Err()
 	}()
 
-	for i := 0; i < 3; i++ {
-		result := <-results
-		if result != nil {
-			return outputBuf.String(), result
+	retError := cmd.Wait()
+
+	for range 3 {
+		err = <-errorCHan
+		if retError == nil && err != nil {
+			retError = err
 		}
 	}
 
-	return outputBuf.String(), cmd.Wait()
+	return outputBuf.String(), retError
 }
 
 func XCommand(command string) (string, error) {
