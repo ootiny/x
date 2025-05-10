@@ -29,16 +29,11 @@ func runCommand(command string, option *commandOption) (string, error) {
 	}
 
 	cmd := (*exec.Cmd)(nil)
-
-	shellCommand := []string{"sh", "-c"}
-	shellCommand = append(shellCommand, parts...)
-
 	if option.Sudo {
-		// Prepend sudo -S to the shell command
-		sudoArgs := append([]string{"-S"}, shellCommand...)
+		sudoArgs := append([]string{"-S"}, parts...)
 		cmd = exec.Command("sudo", sudoArgs...)
 	} else {
-		cmd = exec.Command(shellCommand[0], shellCommand[1:]...)
+		cmd = exec.Command(parts[0], parts[1:]...)
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -88,8 +83,8 @@ func runCommand(command string, option *commandOption) (string, error) {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if option.Stdout != nil {
-				if _, err := fmt.Fprintln(option.Stdout, line); err != nil {
+			if option.Stderr != nil {
+				if _, err := fmt.Fprintln(option.Stderr, line); err != nil {
 					errorCHan <- err
 					return
 				}
@@ -101,7 +96,7 @@ func runCommand(command string, option *commandOption) (string, error) {
 
 	// 启动命令
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("error starting command: %v", err)
+		return "", fmt.Errorf("error starting sudo command: %v", err)
 	} else {
 		for range 3 {
 			if err := <-errorCHan; err != nil {
