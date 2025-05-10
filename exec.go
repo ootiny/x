@@ -72,7 +72,10 @@ func runCommand(command string, option *commandOption) (string, error) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			if option.Stdout != nil {
-				_, _ = Fprintln(option.Stdout, line)
+				if _, err := fmt.Fprintln(option.Stdout, line); err != nil {
+					errorCHan <- err
+					return
+				}
 			}
 			outputBuf.WriteString(line + "\n")
 		}
@@ -84,8 +87,11 @@ func runCommand(command string, option *commandOption) (string, error) {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if option.Stderr != nil {
-				_, _ = fmt.Fprintln(option.Stderr, line)
+			if option.Stdout != nil {
+				if _, err := fmt.Fprintln(option.Stdout, line); err != nil {
+					errorCHan <- err
+					return
+				}
 			}
 			outputBuf.WriteString(line + "\n")
 		}
@@ -95,10 +101,7 @@ func runCommand(command string, option *commandOption) (string, error) {
 	// 启动命令
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("error starting command: %v", err)
-	} else if err := cmd.Wait(); err != nil {
-		return "", fmt.Errorf("error waiting for command: %v", err)
 	} else {
-
 		for range 3 {
 			if err := <-errorCHan; err != nil {
 				return "", fmt.Errorf("error waiting for command: %v", err)
