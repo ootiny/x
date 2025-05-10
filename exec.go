@@ -98,8 +98,8 @@ func runCommand(command string, option *commandOption) (string, error) {
 		errorCHan <- scanner.Err()
 	}()
 
-	retError := cmd.Wait()
-
+	//retError := cmd.Wait()
+	retError := error(nil)
 	for range 3 {
 		err = <-errorCHan
 		if retError == nil && err != nil {
