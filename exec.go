@@ -30,7 +30,8 @@ func runCommand(command string, option *commandOption) (string, error) {
 
 	cmd := (*exec.Cmd)(nil)
 
-	shellCommand := []string{"sh", "-c", command}
+	shellCommand := []string{"sh", "-c"}
+	shellCommand = append(shellCommand, parts...)
 
 	if option.Sudo {
 		// Prepend sudo -S to the shell command
