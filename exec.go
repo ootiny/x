@@ -86,9 +86,10 @@ func runCommand(command string, option *commandOption) (string, error) {
 			writers = append(writers, option.Stdout) // Also write to provided Stdout
 		}
 		combinedStdout := io.MultiWriter(writers...)
-		if _, copyErr := io.Copy(combinedStdout, stdoutPipe); copyErr != nil {
+		if _, copyErr := io.Copy(combinedStdout, stdoutPipe); copyErr != nil && copyErr != io.EOF {
 			// This error means copying from the pipe failed, not that the command itself failed.
 			// For example, if option.Stdout is a writer that errors.
+			// Ignore EOF errors as they are expected when the pipe is closed
 			addError(fmt.Errorf("error copying stdout: %w", copyErr))
 		}
 	}()
@@ -103,7 +104,8 @@ func runCommand(command string, option *commandOption) (string, error) {
 			writers = append(writers, option.Stderr) // Also write to provided Stderr
 		}
 		combinedStderr := io.MultiWriter(writers...)
-		if _, copyErr := io.Copy(combinedStderr, stderrPipe); copyErr != nil {
+		if _, copyErr := io.Copy(combinedStderr, stderrPipe); copyErr != nil && copyErr != io.EOF {
+			// Ignore EOF errors as they are expected when the pipe is closed
 			addError(fmt.Errorf("error copying stderr: %w", copyErr))
 		}
 	}()
