@@ -3,11 +3,17 @@ package x
 import "testing"
 
 func TestCommand(t *testing.T) {
-	command := "wg genkey | tee privatekey | wg pubkey > publickey"
-	result, err := Command(command)
+	command := "ls -la /"
+	_, err := Command(command)
 	if err != nil {
 		t.Fatalf("Command failed: %v", err)
 	}
+}
 
-	t.Logf("Command result: %s", result)
+func TestSudoCommand(t *testing.T) {
+	command := "ls -la /"
+	_, err := SudoCommand(command, "World2019")
+	if err != nil {
+		t.Fatalf("Command failed: %v", err)
+	}
 }

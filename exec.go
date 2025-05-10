@@ -1,13 +1,13 @@
 package x
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 type commandOption struct {
@@ -18,96 +18,106 @@ type commandOption struct {
 }
 
 func runCommand(command string, option *commandOption) (string, error) {
-	// 将command按空格分割成命令和参数
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
+	if command == "" {
 		return "", fmt.Errorf("command cannot be empty")
 	}
-
 	if option == nil {
 		return "", fmt.Errorf("option is nil")
 	}
 
-	cmd := (*exec.Cmd)(nil)
-
+	var cmd *exec.Cmd
 	shellCommand := []string{"sh", "-c", command}
 
 	if option.Sudo {
-		// Prepend sudo -S to the shell command
-		sudoArgs := append([]string{"-S"}, shellCommand...)
-		cmd = exec.Command("sudo", sudoArgs...)
+		cmd = exec.Command("sudo", append([]string{"-S"}, shellCommand...)...)
+		// Provide the password via cmd.Stdin.
+		// If SudoPassword is empty, sudo -S will receive an immediate EOF,
+		// which usually causes it to fail or prompt on TTY if available.
+		cmd.Stdin = strings.NewReader(option.SudoPassword + "\n")
 	} else {
 		cmd = exec.Command(shellCommand[0], shellCommand[1:]...)
 	}
 
-	stdin, err := cmd.StdinPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", Errorf("error creating stdin pipe: %v", err)
+		return "", fmt.Errorf("error creating stdout pipe: %v", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return "", Errorf("error creating stdout pipe: %v", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return "", Errorf("error creating stderr pipe: %v", err)
+		// stdoutPipe was successfully created, but we are erroring out.
+		// It's good practice to close resources we've opened.
+		// However, os.File.Close on a pipe's read end doesn't prevent the child from writing;
+		// it just means our side won't read. cmd.Wait() usually handles cleanup.
+		// For simplicity here, we'll let it be. In more complex scenarios, explicit closing might be needed.
+		return "", fmt.Errorf("error creating stderr pipe: %v", err)
 	}
 
 	var outputBuf bytes.Buffer
+	var wg sync.WaitGroup
+	var multiError error // To collect errors from goroutines and cmd.Wait()
+	var errMu sync.Mutex // To protect multiError
 
-	// 启动命令
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("error starting sudo command: %v", err)
-	}
-
-	errorCHan := make(chan error, 3)
-
-	go func() {
-		defer stdin.Close()
-		if option.Sudo && option.SudoPassword != "" {
-			_, err := io.WriteString(stdin, option.SudoPassword+"\n") // 发送密码并加换行符
-			errorCHan <- err
+	// Function to safely append errors
+	addError := func(newErr error) {
+		if newErr == nil {
+			return
+		}
+		errMu.Lock()
+		defer errMu.Unlock()
+		if multiError == nil {
+			multiError = newErr
 		} else {
-			errorCHan <- nil
-		}
-	}()
-
-	go func() {
-		defer stdout.Close()
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if option.Stdout != nil {
-				fmt.Fprintln(option.Stdout, line)
-			}
-			outputBuf.WriteString(line + "\n")
-		}
-		errorCHan <- scanner.Err()
-	}()
-
-	go func() {
-		defer stderr.Close()
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if option.Stderr != nil {
-				fmt.Fprintln(option.Stderr, line)
-			}
-			outputBuf.WriteString(line + "\n")
-		}
-		errorCHan <- scanner.Err()
-	}()
-
-	retError := cmd.Wait()
-
-	for range 3 {
-		err = <-errorCHan
-		if retError == nil && err != nil {
-			retError = err
+			multiError = fmt.Errorf("%v; %w", multiError, newErr)
 		}
 	}
 
-	return outputBuf.String(), retError
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("error starting command: %v", err)
+	}
+
+	// Goroutine to handle stdout
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var writers []io.Writer
+		writers = append(writers, &outputBuf) // Always capture to outputBuf
+		if option.Stdout != nil {
+			writers = append(writers, option.Stdout) // Also write to provided Stdout
+		}
+		combinedStdout := io.MultiWriter(writers...)
+		if _, copyErr := io.Copy(combinedStdout, stdoutPipe); copyErr != nil {
+			// This error means copying from the pipe failed, not that the command itself failed.
+			// For example, if option.Stdout is a writer that errors.
+			addError(fmt.Errorf("error copying stdout: %w", copyErr))
+		}
+	}()
+
+	// Goroutine to handle stderr
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var writers []io.Writer
+		writers = append(writers, &outputBuf) // Always capture to outputBuf
+		if option.Stderr != nil {
+			writers = append(writers, option.Stderr) // Also write to provided Stderr
+		}
+		combinedStderr := io.MultiWriter(writers...)
+		if _, copyErr := io.Copy(combinedStderr, stderrPipe); copyErr != nil {
+			addError(fmt.Errorf("error copying stderr: %w", copyErr))
+		}
+	}()
+
+	// Wait for the command to finish. This also ensures that the child process
+	// has closed its ends of the stdout/stderr pipes.
+	waitErr := cmd.Wait()
+	addError(waitErr) // Add command execution error (like non-zero exit status)
+
+	// Wait for all I/O goroutines to finish their copying.
+	// This must happen after cmd.Wait() has returned, ensuring pipes are EOF.
+	wg.Wait()
+
+	return outputBuf.String(), multiError
 }
 
 func Command(command string) (string, error) {
