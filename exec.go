@@ -54,12 +54,6 @@ func runCommand(command string, option *commandOption) (string, error) {
 	}
 
 	var outputBuf bytes.Buffer
-
-	// 启动命令
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("error starting sudo command: %v", err)
-	}
-
 	errorCHan := make(chan error, 3)
 
 	go func() {
@@ -98,16 +92,21 @@ func runCommand(command string, option *commandOption) (string, error) {
 		errorCHan <- scanner.Err()
 	}()
 
-	//retError := cmd.Wait()
-	retError := error(nil)
-	for range 3 {
-		err = <-errorCHan
-		if retError == nil && err != nil {
-			retError = err
-		}
-	}
+	// 启动命令
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("error starting command: %v", err)
+	} else if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("error waiting for command: %v", err)
+	} else {
 
-	return outputBuf.String(), retError
+		for range 3 {
+			if err := <-errorCHan; err != nil {
+				return "", fmt.Errorf("error waiting for command: %v", err)
+			}
+		}
+
+		return outputBuf.String(), nil
+	}
 }
 
 func Command(command string) (string, error) {
