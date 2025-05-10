@@ -29,11 +29,15 @@ func runCommand(command string, option *commandOption) (string, error) {
 	}
 
 	cmd := (*exec.Cmd)(nil)
+
+	shellCommand := []string{"sh", "-c", command}
+
 	if option.Sudo {
-		sudoArgs := append([]string{"-S"}, parts...)
+		// Prepend sudo -S to the shell command
+		sudoArgs := append([]string{"-S"}, shellCommand...)
 		cmd = exec.Command("sudo", sudoArgs...)
 	} else {
-		cmd = exec.Command(parts[0], parts[1:]...)
+		cmd = exec.Command(shellCommand[0], shellCommand[1:]...)
 	}
 
 	stdin, err := cmd.StdinPipe()
