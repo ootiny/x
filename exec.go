@@ -120,11 +120,6 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 	lastResult := ""
 
 	for idx, cmd := range evalCommnads {
-		parts := strings.Fields(cmd.value)
-		if len(parts) == 0 {
-			return "", fmt.Errorf("command cannot be empty")
-		}
-
 		config := (*CommandConfig)(nil)
 
 		if len(evalCommnads) == 1 {
@@ -149,7 +144,7 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 			}
 		}
 
-		if result, err := runCommand(config, parts); err != nil {
+		if result, err := runCommand(config, cmd.value); err != nil {
 			return "", err
 		} else {
 			lastResult = result
@@ -159,7 +154,13 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 	return lastResult, nil
 }
 
-func runCommand(config *CommandConfig, parts []string) (string, error) {
+func runCommand(config *CommandConfig, command string) (string, error) {
+	parts := strings.Fields(command)
+
+	if len(parts) == 0 {
+		return "", fmt.Errorf("command cannot be empty")
+	}
+
 	cmd := exec.Command(parts[0], parts[1:]...)
 
 	stdin, err := cmd.StdinPipe()
