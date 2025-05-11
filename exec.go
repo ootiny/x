@@ -8,14 +8,29 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 )
 
-type commandWriteFileList struct {
-	paths []string
-	files []*os.File
+type commandFileList struct {
+	paths    []string
+	files    []*os.File
+	readOnly bool
+	mu       *sync.Mutex
 }
 
-func (p *commandWriteFileList) IOWriterList() []io.Writer {
+func newCommandFileList(paths []string, readOnly bool) *commandFileList {
+	return &commandFileList{
+		paths:    paths,
+		files:    nil,
+		readOnly: readOnly,
+		mu:       &sync.Mutex{},
+	}
+}
+
+func (p *commandFileList) IOWriterList() []io.Writer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	writers := make([]io.Writer, len(p.files))
 	for idx, file := range p.files {
 		writers[idx] = file
@@ -23,7 +38,10 @@ func (p *commandWriteFileList) IOWriterList() []io.Writer {
 	return writers
 }
 
-func (p *commandWriteFileList) IOReaderList() []io.Reader {
+func (p *commandFileList) IOReaderList() []io.Reader {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	readers := make([]io.Reader, len(p.files))
 	for idx, file := range p.files {
 		readers[idx] = file
@@ -31,50 +49,57 @@ func (p *commandWriteFileList) IOReaderList() []io.Reader {
 	return readers
 }
 
-func newCommandWriteFileList(paths []string) *commandWriteFileList {
-	return &commandWriteFileList{
-		paths: paths,
-		files: nil,
-	}
-}
-
-func (p *commandWriteFileList) Open(readOnly bool) error {
-	if p.files == nil {
-		p.files = make([]*os.File, len(p.paths))
-
-		for idx, path := range p.paths {
-			if readOnly {
-				if f, err := os.Open(path); err != nil {
-					return err
-				} else {
-					p.files[idx] = f
-				}
-			} else {
-				if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err != nil {
-					return err
-				} else {
-					p.files[idx] = f
-				}
-			}
+func (p *commandFileList) Open() (err error) {
+	defer func() {
+		if err != nil {
+			_ = p.Close()
 		}
+	}()
 
-		return nil
-	} else {
-		return fmt.Errorf("files already opened")
-	}
-}
-
-func (p *commandWriteFileList) Close() error {
-	err := error(nil)
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	if p.files != nil {
-		for _, file := range p.files {
-			if e := file.Close(); e != nil {
-				err = e
+		p.files = make([]*os.File, len(p.paths))
+	}
+
+	for idx, path := range p.paths {
+		if p.files[idx] != nil {
+			return fmt.Errorf("file already opened")
+		}
+
+		if p.readOnly {
+			if f, err := os.Open(path); err != nil {
+				return err
+			} else {
+				p.files[idx] = f
+			}
+		} else {
+			if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err != nil {
+				return err
+			} else {
+				p.files[idx] = f
 			}
 		}
 	}
 
+	return nil
+}
+
+func (p *commandFileList) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	err := error(nil)
+	if p.files != nil {
+		for idx, file := range p.files {
+			if e := file.Close(); e != nil {
+				err = e
+			} else {
+				p.files[idx] = nil
+			}
+		}
+	}
 	return err
 }
 
@@ -255,15 +280,17 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	}
 
 	// build stdin
-	useStdin := config.Stdin
-	if len(inputFiles) > 0 {
-		list := newCommandWriteFileList(inputFiles)
-		if err := list.Open(true); err != nil {
-			return "", Errorf("error opening input files: %v", err)
-		}
-		defer list.Close()
-		useStdin = io.MultiReader(list.IOReaderList()...)
+	readers := make([]io.Reader, 0)
+	if config.Stdin != nil {
+		readers = append(readers, config.Stdin)
 	}
+	inputList := newCommandFileList(inputFiles, true)
+	if err := inputList.Open(); err != nil {
+		return "", Errorf("error opening input files: %v", err)
+	}
+	defer inputList.Close()
+	readers = append(readers, inputList.IOReaderList()...)
+	useStdin := io.MultiReader(readers...)
 
 	// build stdout
 	writers := make([]io.Writer, 0)
@@ -271,50 +298,72 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	if config.Stdout != nil {
 		writers = append(writers, config.Stdout)
 	}
-	if len(outputFiles) > 0 {
-		list := newCommandWriteFileList(outputFiles)
-		if err := list.Open(false); err != nil {
-			return "", Errorf("error opening output files: %v", err)
-		}
-		defer list.Close()
-		writers = append(writers, list.IOWriterList()...)
-
+	outputList := newCommandFileList(outputFiles, false)
+	if err := outputList.Open(); err != nil {
+		return "", Errorf("error opening output files: %v", err)
 	}
+	defer outputList.Close()
+	writers = append(writers, outputList.IOWriterList()...)
 	useStdout := io.MultiWriter(writers...)
 
 	// build stderr
 	useStderr := config.Stderr
 
-	go func() {
-		defer stdin.Close()
-		if useStdin != nil {
-			_, err := io.Copy(stdin, useStdin)
-			errorCHan <- err
-		} else {
-			errorCHan <- nil
-		}
-	}()
-
-	go func() {
-		defer stdout.Close()
-		_, err := io.Copy(useStdout, stdout)
-		errorCHan <- err
-	}()
-
-	go func() {
-		defer stderr.Close()
-		if useStderr != nil {
-			_, err := io.Copy(useStderr, stderr)
-			errorCHan <- err
-		} else {
-			errorCHan <- nil
-		}
-	}()
-
-	// 启动命令
 	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		stderr.Close()
 		return "", Errorf("error starting command: %v", err)
 	} else {
+		go func() {
+			err := error(nil)
+			if useStdin != nil {
+				buf := make([]byte, 1024)
+				for {
+					n, err := useStdin.Read(buf)
+					if err != nil {
+						break
+					}
+					_, err = stdin.Write(buf[:n])
+					if err != nil {
+						break
+					}
+					fmt.Printf("write: %s\n", string(buf[:n]))
+				}
+			} else {
+				fmt.Println("no stdin")
+			}
+
+			LogWarnf("stdin closed")
+			stdin.Close()
+			errorCHan <- err
+		}()
+
+		go func() {
+			err := error(nil)
+			if useStdout != nil {
+				_, err = io.Copy(useStdout, stdout)
+			}
+
+			LogWarnf("stdout closed")
+
+			stdout.Close()
+			inputList.Close()
+			outputList.Close()
+			errorCHan <- err
+		}()
+
+		go func() {
+			err := error(nil)
+			if useStderr != nil {
+				_, err = io.Copy(useStderr, stderr)
+			}
+
+			LogWarnf("stderr closed")
+			stderr.Close()
+			errorCHan <- err
+		}()
+
 		// wait for stdout and stderr
 		for range 3 {
 			if err := <-errorCHan; err != nil && err != io.EOF {
