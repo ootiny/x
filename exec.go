@@ -59,7 +59,7 @@ func (p *commandFileList) Open() (err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.files != nil {
+	if p.files == nil {
 		p.files = make([]*os.File, len(p.paths))
 	}
 
@@ -75,7 +75,7 @@ func (p *commandFileList) Open() (err error) {
 				p.files[idx] = f
 			}
 		} else {
-			if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err != nil {
+			if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err != nil {
 				return err
 			} else {
 				p.files[idx] = f
@@ -162,13 +162,17 @@ func NewCommand(option ...*CommandConfig) *Command {
 	if len(option) > 1 {
 		panic("only one option is allowed")
 	} else if len(option) == 1 {
+		if option[0].Stdin == os.Stdin {
+			panic("stdin cannot be os.Stdin")
+		}
+
 		return &Command{
 			config: option[0],
 		}
 	} else {
 		return &Command{
 			config: &CommandConfig{
-				Stdin:  os.Stdin,
+				Stdin:  nil,
 				Stdout: os.Stdout,
 				Stderr: os.Stderr,
 			},
@@ -177,6 +181,9 @@ func NewCommand(option ...*CommandConfig) *Command {
 }
 
 func (c *Command) SetStdin(stdin io.Reader) {
+	if stdin == os.Stdin {
+		panic("stdin cannot be os.Stdin")
+	}
 	c.config.Stdin = stdin
 }
 
@@ -235,15 +242,12 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 }
 
 func runCommand(config *CommandConfig, command string) (string, error) {
-
 	commandList := commandSplitString(command, []byte{'<', '>'})
-
 	if len(commandList) == 0 {
 		return "", fmt.Errorf("command cannot be empty")
 	}
 
 	parts := strings.Fields(commandList[0].value)
-
 	if len(parts) == 0 {
 		return "", fmt.Errorf("command cannot be empty")
 	}
@@ -266,9 +270,9 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	output := bytes.NewBuffer(nil)
 	errorCHan := make(chan error, 3)
 
+	// build input and output files
 	inputFiles := []string{}
 	outputFiles := []string{}
-
 	for _, cmd := range commandList {
 		if cmd.op == '<' {
 			inputFiles = append(inputFiles, cmd.value)
@@ -318,23 +322,8 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 		go func() {
 			err := error(nil)
 			if useStdin != nil {
-				buf := make([]byte, 1024)
-				for {
-					n, err := useStdin.Read(buf)
-					if err != nil {
-						break
-					}
-					_, err = stdin.Write(buf[:n])
-					if err != nil {
-						break
-					}
-					fmt.Printf("write: %s\n", string(buf[:n]))
-				}
-			} else {
-				fmt.Println("no stdin")
+				_, err = io.Copy(stdin, useStdin)
 			}
-
-			LogWarnf("stdin closed")
 			stdin.Close()
 			errorCHan <- err
 		}()
@@ -344,9 +333,6 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 			if useStdout != nil {
 				_, err = io.Copy(useStdout, stdout)
 			}
-
-			LogWarnf("stdout closed")
-
 			stdout.Close()
 			inputList.Close()
 			outputList.Close()
@@ -358,8 +344,6 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 			if useStderr != nil {
 				_, err = io.Copy(useStderr, stderr)
 			}
-
-			LogWarnf("stderr closed")
 			stderr.Close()
 			errorCHan <- err
 		}()
