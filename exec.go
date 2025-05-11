@@ -258,6 +258,7 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 		}
 	}
 
+	// build stdin
 	useStdin := config.Stdin
 	if len(inputFiles) > 0 {
 		list := newCommandWriteFileList(inputFiles)
@@ -268,22 +269,24 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 		useStdin = io.MultiReader(list.IOReaderList()...)
 	}
 
-	useStdout := (io.Writer)(nil)
+	// build stdout
+	writers := make([]io.Writer, 0)
+	writers = append(writers, output)
+	if config.Stdout != nil {
+		writers = append(writers, config.Stdout)
+	}
 	if len(outputFiles) > 0 {
 		list := newCommandWriteFileList(outputFiles)
 		if err := list.Open(false); err != nil {
 			return "", Errorf("error opening output files: %v", err)
 		}
 		defer list.Close()
-		writers := make([]io.Writer, 0)
-		writers = append(writers, config.Stdout)
-		writers = append(writers, output)
 		writers = append(writers, list.IOWriterList()...)
-		useStdout = io.MultiWriter(writers...)
-	} else {
-		useStdout = io.MultiWriter(config.Stdout, output)
-	}
 
+	}
+	useStdout := io.MultiWriter(writers...)
+
+	// build stderr
 	useStderr := config.Stderr
 
 	go func() {
