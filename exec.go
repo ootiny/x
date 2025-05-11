@@ -320,6 +320,7 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 				return "", err
 			}
 		}
+
 		return output.String(), nil
 	}
 }
