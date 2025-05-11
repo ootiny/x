@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -32,6 +33,51 @@ func (w *DoubleWriter) Write(p []byte) (n int, err error) {
 	}
 
 	return
+}
+
+type commandSplitItem struct {
+	op    byte
+	value string
+}
+
+func commandSplitString(s string, charArray []byte) []commandSplitItem {
+	var ret []commandSplitItem
+	var currentPart strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	lastOp := byte(0)
+
+	for i := range len(s) {
+		ch := s[i]
+
+		// 处理引号
+		if ch == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			currentPart.WriteByte(ch)
+		} else if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			currentPart.WriteByte(ch)
+		} else if slices.Contains(charArray, ch) && !inSingleQuote && !inDoubleQuote {
+			ret = append(ret, commandSplitItem{
+				op:    lastOp,
+				value: strings.TrimSpace(currentPart.String()),
+			})
+			lastOp = ch
+			currentPart.Reset()
+		} else {
+			currentPart.WriteByte(ch)
+		}
+	}
+
+	// 添加最后一部分
+	if currentPart.Len() > 0 {
+		ret = append(ret, commandSplitItem{
+			op:    lastOp,
+			value: strings.TrimSpace(currentPart.String()),
+		})
+	}
+
+	return ret
 }
 
 type CommandConfig struct {
@@ -65,50 +111,23 @@ func NewCommand(option ...*CommandConfig) *Command {
 func (c *Command) Eval(format string, args ...any) (string, error) {
 	evalString := strings.TrimSpace(Sprintf(format, args...))
 
-	var evalParts []string
-	var currentPart strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
+	evalCommnads := commandSplitString(evalString, []byte{'|'})
 
-	for i := range len(evalString) {
-		ch := evalString[i]
-
-		// 处理引号
-		if ch == '\'' && !inDoubleQuote {
-			inSingleQuote = !inSingleQuote
-			currentPart.WriteByte(ch)
-		} else if ch == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-			currentPart.WriteByte(ch)
-		} else if ch == '|' && !inSingleQuote && !inDoubleQuote {
-			// 只有不在引号内的|才视为管道
-			evalParts = append(evalParts, strings.TrimSpace(currentPart.String()))
-			currentPart.Reset()
-		} else {
-			currentPart.WriteByte(ch)
-		}
-	}
-
-	// 添加最后一部分
-	if currentPart.Len() > 0 {
-		evalParts = append(evalParts, strings.TrimSpace(currentPart.String()))
-	}
-
-	if len(evalParts) == 0 {
+	if len(evalCommnads) == 0 {
 		return "", fmt.Errorf("command cannot be empty")
 	}
 
 	lastResult := ""
 
-	for idx, cmd := range evalParts {
-		parts := strings.Fields(cmd)
+	for idx, cmd := range evalCommnads {
+		parts := strings.Fields(cmd.value)
 		if len(parts) == 0 {
 			return "", fmt.Errorf("command cannot be empty")
 		}
 
 		config := (*CommandConfig)(nil)
 
-		if len(evalParts) == 1 {
+		if len(evalCommnads) == 1 {
 			config = c.config
 		} else if idx == 0 {
 			config = &CommandConfig{
@@ -116,7 +135,7 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 				Stdout: nil,
 				Stderr: c.config.Stderr,
 			}
-		} else if idx == len(evalParts)-1 {
+		} else if idx == len(evalCommnads)-1 {
 			config = &CommandConfig{
 				Stdin:  strings.NewReader(lastResult),
 				Stdout: c.config.Stdout,
@@ -157,7 +176,7 @@ func runCommand(config *CommandConfig, parts []string) (string, error) {
 	}
 
 	output := bytes.NewBuffer(nil)
-	errorCHan := make(chan error, 2)
+	errorCHan := make(chan error, 3)
 
 	go func() {
 		defer stdin.Close()
@@ -186,12 +205,11 @@ func runCommand(config *CommandConfig, parts []string) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", Errorf("error starting command: %v", err)
 	} else {
-		for range 2 {
+		for range 3 {
 			if err := <-errorCHan; err != nil && err != io.EOF {
 				return "", err
 			}
 		}
-
 		return output.String(), nil
 	}
 }

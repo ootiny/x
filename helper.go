@@ -36,15 +36,15 @@ type Nullable interface {
 	~*any | []any | map[any]any | chan any | func()
 }
 
-// FirstNotNil returns the first non-nil value from the arguments
-func FirstNotNil(args ...any) any {
+func FirstNotNil[T Nullable](args ...T) T {
 	for _, arg := range args {
 		if arg != nil {
 			return arg
 		}
 	}
 
-	return nil
+	var zero T
+	return zero
 }
 
 func LastNotNil[T Nullable](args ...T) T {
