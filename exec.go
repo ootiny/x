@@ -10,29 +10,72 @@ import (
 	"strings"
 )
 
-type DoubleWriter struct {
-	l io.Writer
-	r io.Writer
+type commandWriteFileList struct {
+	paths []string
+	files []*os.File
 }
 
-func (w *DoubleWriter) Write(p []byte) (n int, err error) {
-	n = 0
-	err = nil
-	if w.l != nil {
-		n, err = w.l.Write(p)
-		if err != nil {
-			return
+func (p *commandWriteFileList) IOWriterList() []io.Writer {
+	writers := make([]io.Writer, len(p.files))
+	for idx, file := range p.files {
+		writers[idx] = file
+	}
+	return writers
+}
+
+func (p *commandWriteFileList) IOReaderList() []io.Reader {
+	readers := make([]io.Reader, len(p.files))
+	for idx, file := range p.files {
+		readers[idx] = file
+	}
+	return readers
+}
+
+func newCommandWriteFileList(paths []string) *commandWriteFileList {
+	return &commandWriteFileList{
+		paths: paths,
+		files: nil,
+	}
+}
+
+func (p *commandWriteFileList) Open(readOnly bool) error {
+	if p.files == nil {
+		p.files = make([]*os.File, len(p.paths))
+
+		for idx, path := range p.paths {
+			if readOnly {
+				if f, err := os.Open(path); err != nil {
+					return err
+				} else {
+					p.files[idx] = f
+				}
+			} else {
+				if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err != nil {
+					return err
+				} else {
+					p.files[idx] = f
+				}
+			}
+		}
+
+		return nil
+	} else {
+		return fmt.Errorf("files already opened")
+	}
+}
+
+func (p *commandWriteFileList) Close() error {
+	err := error(nil)
+
+	if p.files != nil {
+		for _, file := range p.files {
+			if e := file.Close(); e != nil {
+				err = e
+			}
 		}
 	}
 
-	if w.r != nil {
-		n, err = w.r.Write(p)
-		if err != nil {
-			return
-		}
-	}
-
-	return
+	return err
 }
 
 type commandSplitItem struct {
@@ -155,7 +198,13 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 }
 
 func runCommand(config *CommandConfig, command string) (string, error) {
-	parts := strings.Fields(command)
+	commandList := commandSplitString(command, []byte{'<', '>'})
+
+	if len(commandList) == 0 {
+		return "", fmt.Errorf("command cannot be empty")
+	}
+
+	parts := strings.Fields(commandList[0].value)
 
 	if len(parts) == 0 {
 		return "", fmt.Errorf("command cannot be empty")
@@ -179,27 +228,69 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	output := bytes.NewBuffer(nil)
 	errorCHan := make(chan error, 3)
 
+	inputFiles := []string{}
+	outputFiles := []string{}
+
+	for _, cmd := range commandList {
+		if cmd.op == '<' {
+			inputFiles = append(inputFiles, cmd.value)
+		} else if cmd.op == '>' {
+			outputFiles = append(outputFiles, cmd.value)
+		} else {
+			continue
+		}
+	}
+
+	useStdin := config.Stdin
+	if len(inputFiles) > 0 {
+		list := newCommandWriteFileList(inputFiles)
+		if err := list.Open(true); err != nil {
+			return "", Errorf("error opening input files: %v", err)
+		}
+		defer list.Close()
+		useStdin = io.MultiReader(list.IOReaderList()...)
+	}
+
+	useStdout := (io.Writer)(nil)
+	if len(outputFiles) > 0 {
+		list := newCommandWriteFileList(outputFiles)
+		if err := list.Open(false); err != nil {
+			return "", Errorf("error opening output files: %v", err)
+		}
+		defer list.Close()
+		writers := make([]io.Writer, 0)
+		writers = append(writers, config.Stdout)
+		writers = append(writers, output)
+		writers = append(writers, list.IOWriterList()...)
+		useStdout = io.MultiWriter(writers...)
+	} else {
+		useStdout = io.MultiWriter(config.Stdout, output)
+	}
+	useStderr := config.Stderr
+	if useStderr == nil {
+		useStderr = os.Stderr
+	}
+
 	go func() {
 		defer stdin.Close()
-		_, err := io.Copy(stdin, config.Stdin)
-		errorCHan <- err
+		if useStdin != nil {
+			_, err := io.Copy(stdin, useStdin)
+			errorCHan <- err
+		} else {
+			errorCHan <- nil
+		}
 	}()
 
 	go func() {
 		defer stdout.Close()
-		_, err := io.Copy(&DoubleWriter{l: config.Stdout, r: output}, stdout)
+		_, err := io.Copy(useStdout, stdout)
 		errorCHan <- err
 	}()
 
 	go func() {
 		defer stderr.Close()
-		if config.Stderr != nil {
-			_, err := io.Copy(config.Stderr, stderr)
-			errorCHan <- err
-		} else {
-			_, err := io.Copy(os.Stderr, stderr)
-			errorCHan <- err
-		}
+		_, err := io.Copy(useStderr, stderr)
+		errorCHan <- err
 	}()
 
 	// 启动命令
