@@ -5,7 +5,7 @@ import (
 )
 
 func TestCommand(t *testing.T) {
-	if _, err := NewCommand().Eval("az group list"); err != nil {
+	if _, err := NewCommand().Eval("wg genkey | tee privatekey | wg pubkey > publickey"); err != nil {
 		t.Fatalf("aCommand failed : %v", err)
 	}
 }

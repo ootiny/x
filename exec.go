@@ -237,14 +237,9 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	if err != nil {
 		return "", Errorf("error creating stderr pipe: %v", err)
 	}
-	defer func() {
-		defer stdout.Close()
-		defer stderr.Close()
-		defer stdin.Close()
-	}()
 
 	output := bytes.NewBuffer(nil)
-	errorCHan := make(chan error, 2)
+	errorCHan := make(chan error, 3)
 
 	inputFiles := []string{}
 	outputFiles := []string{}
@@ -291,17 +286,23 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	useStderr := config.Stderr
 
 	go func() {
+		defer stdin.Close()
 		if useStdin != nil {
-			_, _ = io.Copy(stdin, useStdin)
+			_, err := io.Copy(stdin, useStdin)
+			errorCHan <- err
+		} else {
+			errorCHan <- nil
 		}
 	}()
 
 	go func() {
+		defer stdout.Close()
 		_, err := io.Copy(useStdout, stdout)
 		errorCHan <- err
 	}()
 
 	go func() {
+		defer stderr.Close()
 		if useStderr != nil {
 			_, err := io.Copy(useStderr, stderr)
 			errorCHan <- err
@@ -315,7 +316,7 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 		return "", Errorf("error starting command: %v", err)
 	} else {
 		// wait for stdout and stderr
-		for range 2 {
+		for range 3 {
 			if err := <-errorCHan; err != nil && err != io.EOF {
 				return "", err
 			}
