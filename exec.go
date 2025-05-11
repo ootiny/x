@@ -1,7 +1,6 @@
 package x
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -10,31 +9,139 @@ import (
 	"strings"
 )
 
-type commandOption struct {
-	Stdout       io.Writer
-	Stderr       io.Writer
-	Sudo         bool
-	SudoPassword string
+type DoubleWriter struct {
+	l io.Writer
+	r io.Writer
 }
 
-func runCommand(command string, option *commandOption) (string, error) {
-	// 将command按空格分割成命令和参数
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
+func (w *DoubleWriter) Write(p []byte) (n int, err error) {
+	n = 0
+	err = nil
+	if w.l != nil {
+		n, err = w.l.Write(p)
+		if err != nil {
+			return
+		}
+	}
+
+	if w.r != nil {
+		n, err = w.r.Write(p)
+		if err != nil {
+			return
+		}
+	}
+
+	return
+}
+
+type CommandConfig struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+type Command struct {
+	config *CommandConfig
+}
+
+func NewCommand(option ...*CommandConfig) *Command {
+	if len(option) > 1 {
+		panic("only one option is allowed")
+	} else if len(option) == 1 {
+		return &Command{
+			config: option[0],
+		}
+	} else {
+		return &Command{
+			config: &CommandConfig{
+				Stdin:  os.Stdin,
+				Stdout: os.Stdout,
+				Stderr: os.Stderr,
+			},
+		}
+	}
+}
+
+func (c *Command) Eval(format string, args ...any) (string, error) {
+	evalString := strings.TrimSpace(Sprintf(format, args...))
+
+	var evalParts []string
+	var currentPart strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+
+	for i := range len(evalString) {
+		ch := evalString[i]
+
+		// 处理引号
+		if ch == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			currentPart.WriteByte(ch)
+		} else if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			currentPart.WriteByte(ch)
+		} else if ch == '|' && !inSingleQuote && !inDoubleQuote {
+			// 只有不在引号内的|才视为管道
+			evalParts = append(evalParts, strings.TrimSpace(currentPart.String()))
+			currentPart.Reset()
+		} else {
+			currentPart.WriteByte(ch)
+		}
+	}
+
+	// 添加最后一部分
+	if currentPart.Len() > 0 {
+		evalParts = append(evalParts, strings.TrimSpace(currentPart.String()))
+	}
+
+	if len(evalParts) == 0 {
 		return "", fmt.Errorf("command cannot be empty")
 	}
 
-	if option == nil {
-		return "", fmt.Errorf("option is nil")
+	lastResult := ""
+
+	for idx, cmd := range evalParts {
+		parts := strings.Fields(cmd)
+		if len(parts) == 0 {
+			return "", fmt.Errorf("command cannot be empty")
+		}
+
+		config := (*CommandConfig)(nil)
+
+		if len(evalParts) == 1 {
+			config = c.config
+		} else if idx == 0 {
+			config = &CommandConfig{
+				Stdin:  c.config.Stdin,
+				Stdout: nil,
+				Stderr: c.config.Stderr,
+			}
+		} else if idx == len(evalParts)-1 {
+			config = &CommandConfig{
+				Stdin:  strings.NewReader(lastResult),
+				Stdout: c.config.Stdout,
+				Stderr: c.config.Stderr,
+			}
+		} else {
+			config = &CommandConfig{
+				Stdin:  strings.NewReader(lastResult),
+				Stdout: nil,
+				Stderr: c.config.Stderr,
+			}
+		}
+
+		if result, err := runCommand(config, parts); err != nil {
+			return "", err
+		} else {
+			lastResult = result
+		}
 	}
 
-	cmd := (*exec.Cmd)(nil)
-	if option.Sudo {
-		sudoArgs := append([]string{"-S"}, parts...)
-		cmd = exec.Command("sudo", sudoArgs...)
-	} else {
-		cmd = exec.Command(parts[0], parts[1:]...)
-	}
+	return lastResult, nil
+}
+
+func runCommand(config *CommandConfig, parts []string) (string, error) {
+	cmd := exec.Command(parts[0], parts[1:]...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -49,79 +156,42 @@ func runCommand(command string, option *commandOption) (string, error) {
 		return "", Errorf("error creating stderr pipe: %v", err)
 	}
 
-	var outputBuf bytes.Buffer
-	errorCHan := make(chan error, 3)
+	output := bytes.NewBuffer(nil)
+	errorCHan := make(chan error, 2)
 
 	go func() {
 		defer stdin.Close()
-		if option.Sudo && option.SudoPassword != "" {
-			_, err := io.WriteString(stdin, option.SudoPassword+"\n") // 发送密码并加换行符
-			errorCHan <- err
-		} else {
-			errorCHan <- nil
-		}
+		_, err := io.Copy(stdin, config.Stdin)
+		errorCHan <- err
 	}()
 
 	go func() {
 		defer stdout.Close()
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if option.Stdout != nil {
-				if _, err := fmt.Fprintln(option.Stdout, line); err != nil {
-					errorCHan <- err
-					return
-				}
-			}
-			outputBuf.WriteString(line + "\n")
-		}
-		errorCHan <- scanner.Err()
+		_, err := io.Copy(&DoubleWriter{l: config.Stdout, r: output}, stdout)
+		errorCHan <- err
 	}()
 
 	go func() {
 		defer stderr.Close()
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if option.Stderr != nil {
-				if _, err := fmt.Fprintln(option.Stderr, line); err != nil {
-					errorCHan <- err
-					return
-				}
-			}
-			outputBuf.WriteString(line + "\n")
+		if config.Stderr != nil {
+			_, err := io.Copy(config.Stderr, stderr)
+			errorCHan <- err
+		} else {
+			_, err := io.Copy(os.Stderr, stderr)
+			errorCHan <- err
 		}
-		errorCHan <- scanner.Err()
 	}()
 
 	// 启动命令
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("error starting sudo command: %v", err)
+		return "", Errorf("error starting command: %v", err)
 	} else {
-		for range 3 {
-			if err := <-errorCHan; err != nil {
-				return "", fmt.Errorf("error waiting for command: %v", err)
+		for range 2 {
+			if err := <-errorCHan; err != nil && err != io.EOF {
+				return "", err
 			}
 		}
 
-		return outputBuf.String(), nil
+		return output.String(), nil
 	}
-}
-
-func Command(command string) (string, error) {
-	return runCommand(command, &commandOption{
-		Stdout:       os.Stdout,
-		Stderr:       os.Stderr,
-		Sudo:         false,
-		SudoPassword: "",
-	})
-}
-
-func SudoCommand(command string, password string) (string, error) {
-	return runCommand(command, &commandOption{
-		Stdout:       os.Stdout,
-		Stderr:       os.Stderr,
-		Sudo:         true,
-		SudoPassword: password,
-	})
 }
