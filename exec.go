@@ -210,6 +210,7 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 }
 
 func runCommand(config *CommandConfig, command string) (string, error) {
+
 	commandList := commandSplitString(command, []byte{'<', '>'})
 
 	if len(commandList) == 0 {
@@ -296,6 +297,9 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	}()
 
 	go func() {
+		_, _ = useStdout.Write([]byte("$ "))
+		_, _ = useStdout.Write([]byte(command))
+		_, _ = useStdout.Write([]byte("\n"))
 		_, err := io.Copy(useStdout, stdout)
 		errorCHan <- err
 	}()
