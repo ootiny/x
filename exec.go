@@ -297,9 +297,6 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	}()
 
 	go func() {
-		_, _ = useStdout.Write([]byte("$ "))
-		_, _ = useStdout.Write([]byte(command))
-		_, _ = useStdout.Write([]byte("\n"))
 		_, err := io.Copy(useStdout, stdout)
 		errorCHan <- err
 	}()
