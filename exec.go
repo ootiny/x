@@ -151,6 +151,18 @@ func NewCommand(option ...*CommandConfig) *Command {
 	}
 }
 
+func (c *Command) SetStdin(stdin io.Reader) {
+	c.config.Stdin = stdin
+}
+
+func (c *Command) SetStdout(stdout io.Writer) {
+	c.config.Stdout = stdout
+}
+
+func (c *Command) SetStderr(stderr io.Writer) {
+	c.config.Stderr = stderr
+}
+
 func (c *Command) Eval(format string, args ...any) (string, error) {
 	evalString := strings.TrimSpace(Sprintf(format, args...))
 
