@@ -224,9 +224,14 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	if err != nil {
 		return "", Errorf("error creating stderr pipe: %v", err)
 	}
+	defer func() {
+		defer stdout.Close()
+		defer stderr.Close()
+		defer stdin.Close()
+	}()
 
 	output := bytes.NewBuffer(nil)
-	errorCHan := make(chan error, 3)
+	errorCHan := make(chan error, 2)
 
 	inputFiles := []string{}
 	outputFiles := []string{}
@@ -266,38 +271,35 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 	} else {
 		useStdout = io.MultiWriter(config.Stdout, output)
 	}
+
 	useStderr := config.Stderr
-	if useStderr == nil {
-		useStderr = os.Stderr
-	}
 
 	go func() {
-		defer stdin.Close()
 		if useStdin != nil {
-			_, err := io.Copy(stdin, useStdin)
+			_, _ = io.Copy(stdin, useStdin)
+		}
+	}()
+
+	go func() {
+		_, err := io.Copy(useStdout, stdout)
+		errorCHan <- err
+	}()
+
+	go func() {
+		if useStderr != nil {
+			_, err := io.Copy(useStderr, stderr)
 			errorCHan <- err
 		} else {
 			errorCHan <- nil
 		}
 	}()
 
-	go func() {
-		defer stdout.Close()
-		_, err := io.Copy(useStdout, stdout)
-		errorCHan <- err
-	}()
-
-	go func() {
-		defer stderr.Close()
-		_, err := io.Copy(useStderr, stderr)
-		errorCHan <- err
-	}()
-
 	// 启动命令
 	if err := cmd.Start(); err != nil {
 		return "", Errorf("error starting command: %v", err)
 	} else {
-		for range 3 {
+		// wait for stdout and stderr
+		for range 2 {
 			if err := <-errorCHan; err != nil && err != io.EOF {
 				return "", err
 			}
