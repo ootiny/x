@@ -252,7 +252,13 @@ func runCommand(config *CommandConfig, command string) (string, error) {
 		return "", fmt.Errorf("command cannot be empty")
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := (*exec.Cmd)(nil)
+	if parts[0] == "sudo" {
+		sudoArgs := append([]string{"-S"}, parts[1:]...)
+		cmd = exec.Command("sudo", sudoArgs...)
+	} else {
+		cmd = exec.Command(parts[0], parts[1:]...)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
