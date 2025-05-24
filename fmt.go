@@ -5,6 +5,15 @@ import (
 	"io"
 )
 
+// WarpTabs wraps the string with tabs.
+func WarpTabs(numbOfTab uint, s string) string {
+	prifix := ""
+	for range int(numbOfTab) {
+		prifix += "\t"
+	}
+	return prifix + s
+}
+
 // Errorf formats according to a format specifier and returns the string as an error.
 func Errorf(format string, a ...any) error {
 	return fmt.Errorf(format, a...)
