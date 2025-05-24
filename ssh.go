@@ -168,17 +168,18 @@ func SSH(command string, option *SSHOption) (string, error) {
 
 	outCH := make(chan error, 2)
 	inCH := make(chan error, 1)
-	output := newSSHOutput(option.Expect != nil)
+	output := bytes.NewBuffer(nil)
+	expectOutput := newSSHOutput(option.Expect != nil)
 
 	// build stdout
-	outWriters := []io.Writer{output}
+	outWriters := []io.Writer{output, expectOutput}
 	if option.Stdout != nil {
 		outWriters = append(outWriters, option.Stdout)
 	}
 	useStdout := io.MultiWriter(outWriters...)
 
 	// build stderr
-	errWriters := []io.Writer{output}
+	errWriters := []io.Writer{output, expectOutput}
 	if option.Stderr != nil {
 		errWriters = append(errWriters, option.Stderr)
 	}
@@ -187,7 +188,7 @@ func SSH(command string, option *SSHOption) (string, error) {
 	go func() {
 		if option.Expect != nil {
 			for {
-				outputStr, err := output.WaitChange()
+				outputStr, err := expectOutput.WaitChange()
 				if err != nil {
 					inCH <- err
 					return
@@ -231,7 +232,7 @@ func SSH(command string, option *SSHOption) (string, error) {
 		}
 	}
 
-	output.Close()
+	expectOutput.Close()
 
 	if err := <-inCH; err != nil && err != io.EOF {
 		retError = err
