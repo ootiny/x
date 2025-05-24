@@ -197,7 +197,7 @@ func SSH(command string, option *SSHOption) (string, error) {
 					inCH <- err
 					return
 				} else if input != "" {
-					if _, err := Fprintln(stdin, input); err != nil {
+					if _, err := Fprint(stdin, input); err != nil {
 						inCH <- err
 						return
 					}
