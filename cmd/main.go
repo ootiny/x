@@ -1,19 +1,23 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/ootiny/x"
 )
 
 func main() {
-	if _, err := x.NewCommand(&x.CommandConfig{
-		Stdin:  strings.NewReader("World2019\n"),
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-	}).Eval("sudo ls -la /"); err != nil {
-		fmt.Println(err)
+	x.ColorPrintf("red", "Hello, World!\nHello, World!\n")
+	opt := x.NewSSHOptionWithPassword("tianshuo", "192.168.1.81", "World2019")
+	opt.Expect = func(output string) (string, error) {
+		if strings.Contains(output, "[sudo] password for") {
+			return "World2019\n", nil
+		}
+
+		return "", nil
+	}
+
+	if _, err := x.SSH("sudo -S apt-get update", opt); err != nil {
+		panic(err)
 	}
 }

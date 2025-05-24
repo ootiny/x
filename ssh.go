@@ -1,17 +1,85 @@
 package x
 
 import (
-	"bufio"
 	"bytes"
 	"io"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
+type sshOutput struct {
+	contentChangeCH chan string
+	buf             *bytes.Buffer
+	mu              *sync.Mutex
+}
+
+func newSSHOutput(useExpect bool) *sshOutput {
+	ret := &sshOutput{
+		buf: bytes.NewBuffer(nil),
+		mu:  &sync.Mutex{},
+	}
+
+	if useExpect {
+		ret.contentChangeCH = make(chan string)
+	}
+
+	return ret
+}
+
+func (p *sshOutput) Write(data []byte) (n int, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	n, err = p.buf.Write(data)
+
+	if p.contentChangeCH != nil {
+		p.contentChangeCH <- p.buf.String()
+	}
+
+	return n, err
+}
+
+func (p *sshOutput) String() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.buf.String()
+}
+
+func (p *sshOutput) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.contentChangeCH != nil {
+		close(p.contentChangeCH)
+		p.contentChangeCH = nil
+	}
+	return nil
+}
+
+func (p *sshOutput) GetChangeCH() chan string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.contentChangeCH
+}
+
+func (p *sshOutput) WaitChange() (string, error) {
+	if ch := p.GetChangeCH(); ch == nil {
+		return "", io.EOF
+	} else if v, ok := <-ch; ok {
+		return v, nil
+	} else {
+		return "", io.EOF
+	}
+}
+
 type SSHOption struct {
+	Expect     func(output string) (string, error)
 	Stdout     io.Writer
 	Stderr     io.Writer
 	User       string
@@ -87,6 +155,8 @@ func SSH(command string, option *SSHOption) (string, error) {
 	if err != nil {
 		return "", Errorf("error creating stdin pipe: %v", err)
 	}
+	defer stdin.Close()
+
 	stdout, err := session.StdoutPipe()
 	if err != nil {
 		return "", Errorf("error creating stdout pipe: %v", err)
@@ -96,49 +166,80 @@ func SSH(command string, option *SSHOption) (string, error) {
 		return "", Errorf("error creating stderr pipe: %v", err)
 	}
 
-	defer stdin.Close()
+	outCH := make(chan error, 2)
+	inCH := make(chan error, 1)
+	output := newSSHOutput(option.Expect != nil)
 
-	results := make(chan error, 2)
-	var outputBuf bytes.Buffer
+	// build stdout
+	outWriters := []io.Writer{output}
+	if option.Stdout != nil {
+		outWriters = append(outWriters, option.Stdout)
+	}
+	useStdout := io.MultiWriter(outWriters...)
+
+	// build stderr
+	errWriters := []io.Writer{output}
+	if option.Stderr != nil {
+		errWriters = append(errWriters, option.Stderr)
+	}
+	useStdErr := io.MultiWriter(errWriters...)
 
 	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if option.Stdout != nil {
-				if _, err := Fprintln(option.Stdout, line); err != nil {
-					results <- err
+		if option.Expect != nil {
+			for {
+				outputStr, err := output.WaitChange()
+				if err != nil {
+					inCH <- err
 					return
 				}
+
+				if input, err := option.Expect(outputStr); err != nil {
+					inCH <- err
+					return
+				} else if input != "" {
+					if _, err := Fprintln(stdin, input); err != nil {
+						inCH <- err
+						return
+					}
+				} else {
+					continue
+				}
 			}
-			outputBuf.WriteString(line + "\n")
+		} else {
+			inCH <- io.EOF
 		}
-		results <- scanner.Err()
 	}()
 
 	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if option.Stderr != nil {
-				if _, err := Fprintln(option.Stderr, line); err != nil {
-					results <- err
-					return
-				}
-			}
-			outputBuf.WriteString(line + "\n")
-		}
-		results <- scanner.Err()
+		_, err := io.Copy(useStdout, stdout)
+		outCH <- err
 	}()
+
+	go func() {
+		_, err := io.Copy(useStdErr, stderr)
+		outCH <- err
+	}()
+
+	ColorPrintf("purple", "%s@%s: ", option.User, option.Host)
+	ColorPrintf("blue", "%s\n", command)
 
 	retError := session.Run(command)
 
 	for range 2 {
-		err = <-results
-		if retError == nil && err != nil {
+		if err := <-outCH; err != nil && err != io.EOF {
 			retError = err
 		}
 	}
 
-	return outputBuf.String(), retError
+	output.Close()
+
+	if err := <-inCH; err != nil && err != io.EOF {
+		retError = err
+	}
+
+	if retError != nil {
+		return "", retError
+	} else {
+		return output.String(), nil
+	}
 }
