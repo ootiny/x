@@ -7,11 +7,10 @@ import (
 )
 
 func main() {
-	x.ColorPrintf("red", "Hello, World!\nHello, World!\n")
 	opt := x.NewSSHOptionWithPassword("tianshuo", "192.168.1.81", "World2019")
 	opt.Expect = func(output string) (string, error) {
 		if strings.Contains(output, "[sudo] password for") {
-			return "World2019\n", nil
+			return "World2019", nil
 		}
 
 		return "", nil
