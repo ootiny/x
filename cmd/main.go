@@ -16,7 +16,11 @@ func main() {
 		return "", nil
 	}
 
-	if _, err := x.SSH("sudo -S apt-get update", opt); err != nil {
+	// if _, err := x.SSH("sudo -S apt-get update", opt); err != nil {
+	// 	panic(err)
+	// }
+
+	if err := x.SCP("/Users/tianshuo/Downloads/debian-12.11.0-arm64-DVD-1.iso", "/home/tianshuo/1.txt", opt); err != nil {
 		panic(err)
 	}
 }
