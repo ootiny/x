@@ -31,12 +31,9 @@ func newSSHOutput(useExpect bool) *sshOutput {
 }
 
 func (p *sshOutput) Write(data []byte) (n int, err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	n, err = p.buf.Write(data)
 
-	if p.contentChangeCH != nil {
+	if ch := p.GetChangeCH(); ch != nil {
 		p.contentChangeCH <- p.buf.String()
 	}
 
