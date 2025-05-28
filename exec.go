@@ -242,6 +242,7 @@ func (c *Command) Eval(format string, args ...any) (string, error) {
 }
 
 func runCommand(config *CommandConfig, command string) (string, error) {
+	ColorPrintf("blue", "%s\n", command)
 	commandList := commandSplitString(command, []byte{'<', '>'})
 	if len(commandList) == 0 {
 		return "", fmt.Errorf("command cannot be empty")
