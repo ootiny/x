@@ -3,7 +3,9 @@ module github.com/ootiny/x
 go 1.24.2
 
 require (
+	github.com/andybalholm/brotli v1.1.1
 	github.com/google/uuid v1.6.0
+	github.com/klauspost/compress v1.18.0
 	github.com/sirupsen/logrus v1.9.3
 )
 
