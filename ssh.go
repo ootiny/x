@@ -755,8 +755,8 @@ func (p *SSHClient) SCPBytes(
 	return p.SCPFile(tmpName, remotePath, user, group, mode)
 }
 
-// IsServiceEnabled checks if a service is enabled
-func (p *SSHClient) IsServiceEnabled(serviceName string) (bool, error) {
+// IsLinuxServiceEnabled checks if a service is enabled
+func (p *SSHClient) IsLinuxServiceEnabled(serviceName string) (bool, error) {
 	// Detect if the service is enabled
 	if output, err := p.SudoSSH("systemctl is-enabled %s", serviceName); err != nil {
 		return false, err
@@ -765,8 +765,8 @@ func (p *SSHClient) IsServiceEnabled(serviceName string) (bool, error) {
 	}
 }
 
-// IsServiceRunning checks if a service is running
-func (p *SSHClient) IsServiceRunning(serviceName string) (bool, error) {
+// IsLinuxServiceRunning checks if a service is running
+func (p *SSHClient) IsLinuxServiceRunning(serviceName string) (bool, error) {
 	// Detect if the service is running
 	if output, err := p.SudoSSH("systemctl is-active %s", serviceName); err != nil {
 		return false, err
@@ -775,9 +775,9 @@ func (p *SSHClient) IsServiceRunning(serviceName string) (bool, error) {
 	}
 }
 
-// StopService stops a service
-func (p *SSHClient) StopService(serviceName string) error {
-	if running, err := p.IsServiceRunning(serviceName); err != nil {
+// StopLinuxService stops a service
+func (p *SSHClient) StopLinuxService(serviceName string) error {
+	if running, err := p.IsLinuxServiceRunning(serviceName); err != nil {
 		return err
 	} else if !running {
 		return nil
@@ -788,9 +788,9 @@ func (p *SSHClient) StopService(serviceName string) error {
 	}
 }
 
-// DisableService disables a service
-func (p *SSHClient) DisableService(serviceName string) error {
-	if enabled, err := p.IsServiceEnabled(serviceName); err != nil {
+// DisableLinuxService disables a service
+func (p *SSHClient) DisableLinuxService(serviceName string) error {
+	if enabled, err := p.IsLinuxServiceEnabled(serviceName); err != nil {
 		return err
 	} else if !enabled {
 		return nil
@@ -801,9 +801,9 @@ func (p *SSHClient) DisableService(serviceName string) error {
 	}
 }
 
-// EnableService enables a service
-func (p *SSHClient) EnableService(serviceName string) error {
-	if enabled, err := p.IsServiceEnabled(serviceName); err != nil {
+// EnableLinuxService enables a service
+func (p *SSHClient) EnableLinuxService(serviceName string) error {
+	if enabled, err := p.IsLinuxServiceEnabled(serviceName); err != nil {
 		return err
 	} else if enabled {
 		return nil
@@ -814,22 +814,13 @@ func (p *SSHClient) EnableService(serviceName string) error {
 	}
 }
 
-// StartService starts a service
-func (p *SSHClient) StartService(serviceName string) error {
-	if running, err := p.IsServiceRunning(serviceName); err != nil {
+// StartLinuxService starts a service
+func (p *SSHClient) StartLinuxService(serviceName string) error {
+	if running, err := p.IsLinuxServiceRunning(serviceName); err != nil {
 		return err
 	} else if running {
 		return nil
 	} else if _, err := p.SudoSSH("systemctl start %s", serviceName); err != nil {
-		return err
-	} else {
-		return nil
-	}
-}
-
-// DaemonReload reloads the daemon
-func (p *SSHClient) DaemonReload() error {
-	if _, err := p.SudoSSH("systemctl daemon-reload"); err != nil {
 		return err
 	} else {
 		return nil
@@ -845,13 +836,11 @@ func (p *SSHClient) DeployLinuxService(
 
 	if err := p.SCPBytes([]byte(serviceContent), serviceRemoteFilePath, "root", "root", 0644); err != nil {
 		return err
-	}
-
-	if err := p.DaemonReload(); err != nil {
+	} else if _, err := p.SudoSSH("systemctl daemon-reload"); err != nil {
 		return err
-	} else if err := p.EnableService(serviceName); err != nil {
+	} else if err := p.EnableLinuxService(serviceName); err != nil {
 		return err
-	} else if err := p.StartService(serviceName); err != nil {
+	} else if err := p.StartLinuxService(serviceName); err != nil {
 		return err
 	} else {
 		return nil
