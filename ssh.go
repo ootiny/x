@@ -728,3 +728,75 @@ func (p *SSHClient) SCPContent(
 
 	return nil
 }
+
+// IsServiceEnabled checks if a service is enabled
+func (p *SSHClient) IsServiceEnabled(serviceName string) (bool, error) {
+	// Detect if the service is enabled
+	if output, err := p.SudoSSH("systemctl is-enabled %s", serviceName); err != nil {
+		return false, err
+	} else {
+		return strings.TrimSpace(output) == "enabled", nil
+	}
+}
+
+// IsServiceRunning checks if a service is running
+func (p *SSHClient) IsServiceRunning(serviceName string) (bool, error) {
+	// Detect if the service is running
+	if output, err := p.SudoSSH("systemctl is-active %s", serviceName); err != nil {
+		return false, err
+	} else {
+		return strings.TrimSpace(output) == "active", nil
+	}
+}
+
+// StopService stops a service
+func (p *SSHClient) StopService(serviceName string) error {
+	if running, err := p.IsServiceRunning(serviceName); err != nil {
+		return err
+	} else if !running {
+		return nil
+	} else if _, err := p.SudoSSH("systemctl stop %s", serviceName); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
+
+// DisableService disables a service
+func (p *SSHClient) DisableService(serviceName string) error {
+	if enabled, err := p.IsServiceEnabled(serviceName); err != nil {
+		return err
+	} else if !enabled {
+		return nil
+	} else if _, err := p.SudoSSH("systemctl disable %s", serviceName); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
+
+// EnableService enables a service
+func (p *SSHClient) EnableService(serviceName string) error {
+	if enabled, err := p.IsServiceEnabled(serviceName); err != nil {
+		return err
+	} else if enabled {
+		return nil
+	} else if _, err := p.SudoSSH("systemctl enable %s", serviceName); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
+
+// StartService starts a service
+func (p *SSHClient) StartService(serviceName string) error {
+	if running, err := p.IsServiceRunning(serviceName); err != nil {
+		return err
+	} else if running {
+		return nil
+	} else if _, err := p.SudoSSH("systemctl start %s", serviceName); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
