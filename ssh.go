@@ -35,6 +35,26 @@ func (pw *scpProgressWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+type newlineWriter struct {
+	writer    io.Writer
+	firstData bool
+}
+
+func WrapNewLineWriter(writer io.Writer) io.Writer {
+	return &newlineWriter{
+		writer:    writer,
+		firstData: true,
+	}
+}
+
+func (p *newlineWriter) Write(data []byte) (n int, err error) {
+	if p.firstData {
+		p.firstData = false
+		_, _ = p.writer.Write([]byte("\n"))
+	}
+	return p.writer.Write(data)
+}
+
 type sshOutput struct {
 	contentChangeCH chan string
 	buf             *bytes.Buffer
@@ -409,14 +429,14 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	// build stdout
 	outWriters := []io.Writer{output, expectOutput}
 	if p.stdout != nil {
-		outWriters = append(outWriters, p.stdout)
+		outWriters = append(outWriters, WrapNewLineWriter(p.stdout))
 	}
 	useStdout := io.MultiWriter(outWriters...)
 
 	// build stderr
 	errWriters := []io.Writer{expectOutput}
 	if p.stderr != nil {
-		errWriters = append(errWriters, p.stderr)
+		errWriters = append(errWriters, WrapNewLineWriter(p.stderr))
 	}
 	useStdErr := io.MultiWriter(errWriters...)
 
@@ -458,9 +478,6 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 
 	ColorPrintf("purple", "%s@%s: ", p.user, p.host)
 	ColorPrintf("blue", "%s", command)
-	if p.stdout != nil {
-		ColorPrintf("blue", "\n")
-	}
 
 	retError := session.Run(command)
 
@@ -477,12 +494,14 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	}
 
 	if retError != nil {
+		if p.stderr == nil {
+			ColorPrintf("red", "\n✗ failed\n")
+		}
 		return "", retError
 	} else {
 		if p.stdout == nil {
-			ColorPrintf("green", " ✓\n")
+			ColorPrintf("green", "\n✔ ok\n")
 		}
-
 		return output.String(), nil
 	}
 }

@@ -27,7 +27,7 @@ func RestoreEsxiVM(vmid int, snapshotId int) error {
 }
 
 func main() {
-	remote := x.NewSSHClient("root", "192.168.1.7", "World2019")
+	remote := x.NewSSHClient("tianshuo", "192.168.1.7", "World2019")
 	remote.SetExpect(func(output string) (string, error) {
 		if strings.Contains(output, "assword") {
 			return "World2019\n", nil
@@ -40,8 +40,9 @@ func main() {
 	defer remote.Close()
 
 	remote.SetStdout(nil)
+	remote.SetStderr(nil)
 
-	if output, err := remote.SudoSSH("pwd"); err != nil {
+	if output, err := remote.SudoSSH("pwdd"); err != nil {
 		panic(err)
 	} else {
 		x.LogInfo(output)
