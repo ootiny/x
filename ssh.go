@@ -835,3 +835,25 @@ func (p *SSHClient) DaemonReload() error {
 		return nil
 	}
 }
+
+// DeployLinuxService deploys a linux service
+func (p *SSHClient) DeployLinuxService(
+	serviceContent string,
+	serviceRemoteFilePath string,
+) error {
+	serviceName := filepath.Base(serviceRemoteFilePath)
+
+	if err := p.SCPBytes([]byte(serviceContent), serviceRemoteFilePath, "root", "root", 0644); err != nil {
+		return err
+	}
+
+	if err := p.DaemonReload(); err != nil {
+		return err
+	} else if err := p.EnableService(serviceName); err != nil {
+		return err
+	} else if err := p.StartService(serviceName); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
