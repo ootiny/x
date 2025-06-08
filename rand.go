@@ -116,3 +116,36 @@ func RandString(length int) string {
 
 	return sb.String()
 }
+
+func RandFileName(length int) string {
+	// 随机生成一个文件名，文件名由数字和小写字母组成，长度为length
+	// 文件名不能以数字开头
+
+	if length <= 0 {
+		return ""
+	}
+
+	const letterBytes = "abcdefghijklmnopqrstuvwxyz0123456789"
+	const letterIdxBits = 6
+	const letterIdxMask = 1<<letterIdxBits - 1
+	const letterIdxMax = 63 / letterIdxBits
+
+	var sb strings.Builder
+	sb.Grow(length)
+
+	for i, cache, remain := 0, rand.Int63(), letterIdxMax; i < length; {
+		if remain == 0 {
+			cache, remain = rand.Int63(), letterIdxMax
+		}
+
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			sb.WriteByte(letterBytes[idx])
+			i++
+		}
+
+		cache >>= letterIdxBits
+		remain--
+	}
+
+	return sb.String()
+}

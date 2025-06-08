@@ -131,6 +131,7 @@ type SSHClient struct {
 	password   string
 	sshTimeout time.Duration
 	scpTimeout time.Duration
+	sshTempDir string
 	auth       []ssh.AuthMethod
 	runMu      *sync.Mutex
 	errorsMu   *sync.Mutex
@@ -149,6 +150,7 @@ func NewSSHClient(user string, host string, password string) *SSHClient {
 		password:   password,
 		sshTimeout: time.Second * 60,
 		scpTimeout: time.Second * 600,
+		sshTempDir: "/tmp",
 		auth:       []ssh.AuthMethod{},
 		runMu:      &sync.Mutex{},
 		errorsMu:   &sync.Mutex{},
@@ -176,6 +178,14 @@ func (p *SSHClient) getLastError() error {
 		return p.errors[len(p.errors)-1]
 	}
 	return nil
+}
+
+// SetSSHTempDir sets the temporary directory for the SSHClient
+func (p *SSHClient) SetSSHTempDir(dir string) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	p.sshTempDir = dir
+	return p
 }
 
 // SetPort sets the port for the SSHClient
@@ -507,7 +517,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 }
 
 // SCP uploads a file to the SSHClient
-func (p *SSHClient) SCP(localPath string, remotePath string) error {
+func (p *SSHClient) scp(localPath string, remotePath string) error {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
 
@@ -672,6 +682,48 @@ func (p *SSHClient) SCP(localPath string, remotePath string) error {
 			return Errorf("remote scp command failed with exit status %d: %w", exitErr.ExitStatus(), err)
 		}
 		return Errorf("remote scp command failed: %w", err)
+	}
+
+	return nil
+}
+
+func (p *SSHClient) SCPFile(
+	localPath string,
+	remotePath string,
+	user string, group string, mode os.FileMode,
+) error {
+	tmpName := RandFileName(16) + ".tmp"
+	remoteTempPath := filepath.Join(p.sshTempDir, tmpName)
+
+	if err := p.scp(localPath, remoteTempPath); err != nil {
+		return err
+	} else if _, err := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); err != nil {
+		return err
+	} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, remotePath); err != nil {
+		return err
+	} else if _, err := p.SudoSSH("chmod %o %s", mode, remotePath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *SSHClient) SCPContent(
+	content string,
+	remotePath string,
+	user string, group string, mode os.FileMode,
+) error {
+	tmpName := RandFileName(16) + ".tmp"
+	remoteTempPath := filepath.Join(p.sshTempDir, tmpName)
+
+	if _, err := p.SSH("echo '%s' > %s", content, remoteTempPath); err != nil {
+		return err
+	} else if _, err := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); err != nil {
+		return err
+	} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, remotePath); err != nil {
+		return err
+	} else if _, err := p.SudoSSH("chmod %o %s", mode, remotePath); err != nil {
+		return err
 	}
 
 	return nil

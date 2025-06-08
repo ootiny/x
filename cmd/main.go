@@ -42,15 +42,15 @@ func main() {
 	remote.SetStdout(nil)
 	remote.SetStderr(nil)
 
-	if output, err := remote.SudoSSH("pwdd"); err != nil {
-		panic(err)
-	} else {
-		x.LogInfo(output)
-	}
-
-	// if err := remote.SCP("~/Downloads/test.txt", "/tmp/test.txt"); err != nil {
+	// if output, err := remote.SudoSSH("pwdd"); err != nil {
 	// 	panic(err)
+	// } else {
+	// 	x.LogInfo(output)
 	// }
+
+	if err := remote.SCPContent("~/Downloads/test.txt", "/etc/test.txt", "root", "root", 0755); err != nil {
+		panic(err)
+	}
 
 	// homeDir, err := remote.RemoteHomeDir()
 	// if err != nil {
