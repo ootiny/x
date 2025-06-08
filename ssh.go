@@ -843,10 +843,6 @@ func (p *SSHClient) DeployLinuxService(
 ) error {
 	serviceName := filepath.Base(serviceRemoteFilePath)
 
-	if err := p.StopService(serviceName); err != nil {
-		return err
-	}
-
 	if err := p.SCPBytes([]byte(serviceContent), serviceRemoteFilePath, "root", "root", 0644); err != nil {
 		return err
 	}
