@@ -39,8 +39,8 @@ func main() {
 	}
 	defer remote.Close()
 
-	remote.SetStdout(nil)
-	remote.SetStderr(nil)
+	// remote.SetStdout(nil)
+	// remote.SetStderr(nil)
 
 	// if output, err := remote.SudoSSH("pwdd"); err != nil {
 	// 	panic(err)
@@ -48,7 +48,7 @@ func main() {
 	// 	x.LogInfo(output)
 	// }
 
-	if err := remote.SCPBytes([]byte("test"), "/etc/test.txt", "root", "root", 0755); err != nil {
+	if err := remote.SCPBytes([]byte("test"), "/opt/app1/test.txt", "root", "root", 0755); err != nil {
 		panic(err)
 	}
 

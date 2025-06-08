@@ -2,6 +2,8 @@ package x
 
 import "golang.org/x/exp/constraints"
 
+func Ignore() {}
+
 func Max[T constraints.Ordered](args ...T) T {
 	if len(args) == 0 {
 		panic("Max: no arguments")

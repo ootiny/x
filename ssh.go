@@ -506,13 +506,23 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	if retError != nil {
 		if p.stderr == nil {
 			ColorPrintf("red", "\n✗ failed\n")
+		} else if !strings.HasSuffix(expectOutput.String(), "\n") {
+			Print("\n")
+		} else {
+			Ignore()
 		}
+
 		return "", retError
 	} else {
 		if p.stdout == nil {
 			ColorPrintf("green", "\n✔ ok\n")
+		} else if !strings.HasSuffix(output.String(), "\n") {
+			Print("\n")
+		} else {
+			Ignore()
 		}
-		return output.String(), nil
+
+		return strings.TrimSpace(output.String()), nil
 	}
 }
 
@@ -694,6 +704,23 @@ func (p *SSHClient) SCPFile(
 	tmpName := RandFileName(16) + ".tmp"
 	remoteTempPath := filepath.Join(p.sshTempDir, tmpName)
 
+	dir := filepath.Dir(remotePath)
+
+	// test if remote dir exists
+	if output, err := p.SudoSSH("test -d %s && echo 'yes' || echo 'no'", dir); err != nil {
+		return err
+	} else if output == "no" {
+		if _, err := p.SudoSSH("mkdir -p %s", dir); err != nil {
+			return err
+		} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, dir); err != nil {
+			return err
+		} else {
+			Ignore()
+		}
+	} else {
+		Ignore()
+	}
+
 	if err := p.scp(localPath, remoteTempPath); err != nil {
 		return err
 	} else if _, err := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); err != nil {
@@ -702,9 +729,9 @@ func (p *SSHClient) SCPFile(
 		return err
 	} else if _, err := p.SudoSSH("chmod %o %s", mode, remotePath); err != nil {
 		return err
+	} else {
+		return nil
 	}
-
-	return nil
 }
 
 func (p *SSHClient) SCPBytes(
