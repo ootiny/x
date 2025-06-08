@@ -688,8 +688,7 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 }
 
 func (p *SSHClient) SCPFile(
-	localPath string,
-	remotePath string,
+	localPath string, remotePath string,
 	user string, group string, mode os.FileMode,
 ) error {
 	tmpName := RandFileName(16) + ".tmp"
@@ -708,25 +707,25 @@ func (p *SSHClient) SCPFile(
 	return nil
 }
 
-func (p *SSHClient) SCPContent(
-	content string,
-	remotePath string,
+func (p *SSHClient) SCPBytes(
+	bytes []byte, remotePath string,
 	user string, group string, mode os.FileMode,
 ) error {
 	tmpName := RandFileName(16) + ".tmp"
-	remoteTempPath := filepath.Join(p.sshTempDir, tmpName)
 
-	if _, err := p.SSH("echo '%s' > %s", content, remoteTempPath); err != nil {
-		return err
-	} else if _, err := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); err != nil {
-		return err
-	} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, remotePath); err != nil {
-		return err
-	} else if _, err := p.SudoSSH("chmod %o %s", mode, remotePath); err != nil {
-		return err
+	// write bytes to  file tmpName
+	tempFile, err := os.Create(tmpName)
+	if err != nil {
+		return Errorf("failed to create temp file: %w", err)
+	}
+	defer tempFile.Close()
+	defer os.Remove(tmpName)
+
+	if _, err := tempFile.Write(bytes); err != nil {
+		return Errorf("failed to write bytes to temp file: %w", err)
 	}
 
-	return nil
+	return p.SCPFile(tmpName, remotePath, user, group, mode)
 }
 
 // IsServiceEnabled checks if a service is enabled

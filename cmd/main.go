@@ -48,7 +48,7 @@ func main() {
 	// 	x.LogInfo(output)
 	// }
 
-	if err := remote.SCPContent("~/Downloads/test.txt", "/etc/test.txt", "root", "root", 0755); err != nil {
+	if err := remote.SCPBytes([]byte("test"), "/etc/test.txt", "root", "root", 0755); err != nil {
 		panic(err)
 	}
 
