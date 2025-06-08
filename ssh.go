@@ -834,9 +834,13 @@ func (p *SSHClient) DeployLinuxService(
 ) error {
 	serviceName := filepath.Base(serviceRemoteFilePath)
 
-	if err := p.SCPBytes([]byte(serviceContent), serviceRemoteFilePath, "root", "root", 0644); err != nil {
-		return err
-	} else if _, err := p.SudoSSH("systemctl daemon-reload"); err != nil {
+	if len(strings.TrimSpace(serviceContent)) > 0 {
+		if err := p.SCPBytes([]byte(serviceContent), serviceRemoteFilePath, "root", "root", 0644); err != nil {
+			return err
+		}
+	}
+
+	if _, err := p.SudoSSH("systemctl daemon-reload"); err != nil {
 		return err
 	} else if err := p.EnableLinuxService(serviceName); err != nil {
 		return err
