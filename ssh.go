@@ -800,3 +800,12 @@ func (p *SSHClient) StartService(serviceName string) error {
 		return nil
 	}
 }
+
+// DaemonReload reloads the daemon
+func (p *SSHClient) DaemonReload() error {
+	if _, err := p.SudoSSH("systemctl daemon-reload"); err != nil {
+		return err
+	} else {
+		return nil
+	}
+}
