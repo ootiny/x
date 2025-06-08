@@ -1,28 +1,59 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/ootiny/x"
 )
 
 func RestoreEsxiVM(vmid int, snapshotId int) error {
-	opt := x.NewSSHOptionWithPassword("root", "192.168.1.11", "Tscc0805@")
-	opt.Expect = func(output string) (string, error) {
-		fmt.Println(output)
-		if strings.Contains(output, "Tscc0805@") {
-			return "Tscc0805@\n", nil
+	remote := x.NewSSHClient("root", "192.168.1.11", "Tscc0805@")
+	remote.AuthKeyboardInteractive(func(user, instruction string, questions []string, echos []bool) (answers []string, err error) {
+		answers = make([]string, len(questions))
+		for i := range questions {
+			answers[i] = "Tscc0805@"
 		}
-		return "", nil
-	}
-	if _, err := x.SSH(fmt.Sprintf("vim-cmd vmsvc/snapshot.revert %d %d 0", vmid, snapshotId), opt); err != nil {
+		return answers, nil
+	})
+	if err := remote.Open(); err != nil {
 		return err
-	} else {
-		return nil
 	}
+	defer remote.Close()
+
+	if _, err := remote.SSH("vim-cmd vmsvc/snapshot.revert %d %d 0", vmid, snapshotId); err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {
-	fmt.Println(RestoreEsxiVM(56, 1))
+	remote := x.NewSSHClient("root", "192.168.1.7", "World2019")
+	remote.SetExpect(func(output string) (string, error) {
+		if strings.Contains(output, "assword") {
+			return "World2019\n", nil
+		}
+		return "", nil
+	})
+	if err := remote.Open(); err != nil {
+		panic(err)
+	}
+	defer remote.Close()
+
+	remote.SetStdout(nil)
+
+	if output, err := remote.SudoSSH("pwd"); err != nil {
+		panic(err)
+	} else {
+		x.LogInfo(output)
+	}
+
+	// if err := remote.SCP("~/Downloads/test.txt", "/tmp/test.txt"); err != nil {
+	// 	panic(err)
+	// }
+
+	// homeDir, err := remote.RemoteHomeDir()
+	// if err != nil {
+	// 	panic(err)
+	// }
+
 }

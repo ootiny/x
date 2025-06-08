@@ -6,11 +6,34 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
+
+// progressWriter wraps an io.Writer and reports progress
+type scpProgressWriter struct {
+	writer     io.Writer
+	total      int64
+	current    int64
+	lastUpdate time.Time
+	onProgress func(current, total int64)
+}
+
+func (pw *scpProgressWriter) Write(p []byte) (int, error) {
+	n, err := pw.writer.Write(p)
+	pw.current += int64(n)
+
+	// Update progress at most 10 times per second to avoid flooding the terminal
+	if time.Since(pw.lastUpdate) > 100*time.Millisecond {
+		pw.onProgress(pw.current, pw.total)
+		pw.lastUpdate = time.Now()
+	}
+
+	return n, err
+}
 
 type sshOutput struct {
 	contentChangeCH chan string
@@ -76,118 +99,329 @@ func (p *sshOutput) WaitChange() (string, error) {
 	}
 }
 
-type SSHOption struct {
-	Expect     func(output string) (string, error)
-	Stdout     io.Writer
-	Stderr     io.Writer
-	User       string
-	Host       string
-	Port       string
-	Password   string
-	PrivateKey string
-	Timeout    time.Duration
+// SSHClient is a client for SSH connections
+type SSHClient struct {
+	runClient  *ssh.Client
+	expect     func(output string) (string, error)
+	stdout     io.Writer
+	stderr     io.Writer
+	user       string
+	host       string
+	port       uint16
+	password   string
+	sshTimeout time.Duration
+	scpTimeout time.Duration
+	auth       []ssh.AuthMethod
+	runMu      *sync.Mutex
+	errorsMu   *sync.Mutex
+	errors     []error
 }
 
-func NewSSHOptionWithPassword(user, host, password string) *SSHOption {
-	return &SSHOption{
-		Stdout:   os.Stdout,
-		Stderr:   os.Stderr,
-		User:     user,
-		Host:     host,
-		Port:     "22",
-		Password: password,
+// NewSSHClient creates a new SSHClient
+func NewSSHClient(user string, host string, password string) *SSHClient {
+	ret := &SSHClient{
+		expect:     nil,
+		stdout:     os.Stdout,
+		stderr:     os.Stderr,
+		user:       user,
+		host:       host,
+		port:       22,
+		password:   password,
+		sshTimeout: time.Second * 60,
+		scpTimeout: time.Second * 600,
+		auth:       []ssh.AuthMethod{},
+		runMu:      &sync.Mutex{},
+		errorsMu:   &sync.Mutex{},
+		errors:     []error{},
 	}
+
+	if password != "" {
+		ret.auth = append(ret.auth, ssh.Password(password))
+	}
+
+	return ret
 }
 
-func NewSSHOptionWithPrivateKey(user, host, privateKey string) *SSHOption {
-	return &SSHOption{
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-		User:       user,
-		Host:       host,
-		Port:       "22",
-		PrivateKey: privateKey,
-	}
+func (p *SSHClient) setError(err error) *SSHClient {
+	p.errorsMu.Lock()
+	defer p.errorsMu.Unlock()
+	p.errors = append(p.errors, err)
+	return p
 }
 
-func SSH(command string, option *SSHOption) (string, error) {
-	if option.User == "" {
-		return "", Errorf("user is empty")
+func (p *SSHClient) getLastError() error {
+	p.errorsMu.Lock()
+	defer p.errorsMu.Unlock()
+	if len(p.errors) > 0 {
+		return p.errors[len(p.errors)-1]
 	}
-	if option.Host == "" {
-		return "", Errorf("host is empty")
+	return nil
+}
+
+// SetPort sets the port for the SSHClient
+func (p *SSHClient) SetPort(port uint16) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		panic("client is already open")
 	}
 
-	if option.Timeout == 0 {
-		option.Timeout = time.Second * 60
+	p.port = port
+	return p
+}
+
+func (p *SSHClient) SetStdout(stdout io.Writer) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	p.stdout = stdout
+	return p
+}
+
+func (p *SSHClient) SetStderr(stderr io.Writer) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	p.stderr = stderr
+	return p
+}
+
+// SetExpect sets the expect function for the SSHClient
+func (p *SSHClient) SetExpect(expect func(output string) (string, error)) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		panic("client is already open")
 	}
 
-	auth := []ssh.AuthMethod{}
-	if option.PrivateKey != "" {
-		signer, err := ssh.ParsePrivateKey([]byte(option.PrivateKey))
-		if err != nil {
-			return "", Errorf("failed to parse private key: %v", err)
+	p.expect = expect
+	return p
+}
+
+// SetSSHTimeout sets the timeout for the SSH connection
+func (p *SSHClient) SetSSHTimeout(timeout time.Duration) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		panic("client is already open")
+	}
+
+	p.sshTimeout = timeout
+	return p
+}
+
+// SetSCPTimeout sets the timeout for the SCP connection
+func (p *SSHClient) SetSCPTimeout(timeout time.Duration) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		panic("client is already open")
+	}
+
+	p.scpTimeout = timeout
+	return p
+}
+
+// AuthKeyboardInteractive adds a keyboard interactive authentication method to the SSHClient
+func (p *SSHClient) AuthKeyboardInteractive(callback ssh.KeyboardInteractiveChallenge) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		panic("client is already open")
+	}
+
+	p.auth = append(p.auth, ssh.KeyboardInteractive(callback))
+	return p
+}
+
+// AuthPrivateKey adds a private key authentication method to the SSHClient
+func (p *SSHClient) AuthPrivateKey(privateKey string) *SSHClient {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		panic("client is already open")
+	}
+
+	privateKeyPath := privateKey
+	if strings.HasPrefix(privateKeyPath, "~/") {
+		privateKeyPath = filepath.Join(os.Getenv("HOME"), privateKeyPath[2:])
+	}
+
+	// if privateKey as file exists, read the file
+	if fileInfo, err := os.Stat(privateKeyPath); err == nil && !fileInfo.IsDir() {
+		if v, err := os.ReadFile(privateKeyPath); err != nil {
+			p.setError(err)
+			return p
+		} else {
+			privateKey = string(v)
 		}
-		auth = append(auth, ssh.PublicKeys(signer))
-	} else if option.Password != "" {
-		auth = append(auth, ssh.Password(option.Password))
+	}
+
+	signer, err := ssh.ParsePrivateKey([]byte(privateKey))
+	if err != nil {
+		p.setError(err)
+		return p
+	}
+	p.auth = append(p.auth, ssh.PublicKeys(signer))
+	return p
+}
+
+func (p *SSHClient) Open() error {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if err := p.getLastError(); err != nil {
+		return err
+	}
+
+	if p.user == "" {
+		reportErr := Errorf("user is empty")
+		p.setError(reportErr)
+		return reportErr
+	}
+	if p.host == "" {
+		reportErr := Errorf("host is empty")
+		p.setError(reportErr)
+		return reportErr
+	}
+	if p.port == 0 {
+		p.port = 22
+	}
+
+	if p.sshTimeout == 0 {
+		p.sshTimeout = time.Second * 60
+	}
+
+	if client, err := ssh.Dial(
+		"tcp",
+		net.JoinHostPort(p.host, Sprintf("%d", p.port)),
+		&ssh.ClientConfig{
+			User:            p.user,
+			Auth:            p.auth,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         p.sshTimeout,
+		},
+	); err != nil {
+		reportErr := Errorf("failed to dial: %s@%s:%d : %v", p.user, p.host, p.port, err)
+		p.setError(reportErr)
+		return reportErr
 	} else {
-		return "", Errorf("password or private key is empty")
+		p.runClient = client
+		return nil
+	}
+}
+
+func (p *SSHClient) Close() error {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.runClient != nil {
+		ret := p.runClient.Close()
+		if ret != nil {
+			return ret
+		} else {
+			p.runClient = nil
+			return nil
+		}
+	} else {
+		return nil
+	}
+}
+
+func (p *SSHClient) RemoteHomeDir() (string, error) {
+	if output, err := p.SSH("echo $HOME"); err != nil {
+		return "", err
+	} else {
+		return output, nil
+	}
+}
+
+func (p *SSHClient) SudoSSH(format string, args ...any) (string, error) {
+	if p.user == "root" {
+		return p.ssh(false, format, args...)
+	} else {
+		return p.ssh(true, format, args...)
+	}
+}
+
+func (p *SSHClient) SSH(format string, args ...any) (string, error) {
+	return p.ssh(false, format, args...)
+}
+
+// SSH executes a command on the SSHClient
+func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if err := p.getLastError(); err != nil {
+		return "", err
 	}
 
-	client, err := ssh.Dial("tcp", net.JoinHostPort(option.Host, option.Port), &ssh.ClientConfig{
-		User:            option.User,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // 在生产环境中不推荐
-		Timeout:         option.Timeout,
-	})
-	if err != nil {
-		return "", Errorf("failed to dial: %s@%s:22 : %v", option.User, option.Host, err)
+	if p.runClient == nil {
+		reportErr := Errorf("client is not open")
+		p.setError(reportErr)
+		return "", reportErr
 	}
-	defer client.Close()
 
-	session, err := client.NewSession()
+	command := Sprintf(format, args...)
+	if sudo {
+		command = Sprintf("sudo -S %s", command)
+	}
+
+	session, err := p.runClient.NewSession()
 	if err != nil {
-		return "", Errorf("failed to create session: %v", err)
+		reportErr := Errorf("failed to create session: %v", err)
+		p.setError(reportErr)
+		return "", reportErr
 	}
 	defer session.Close()
 
 	stdin, err := session.StdinPipe()
 	if err != nil {
-		return "", Errorf("error creating stdin pipe: %v", err)
+		reportErr := Errorf("error creating stdin pipe: %v", err)
+		p.setError(reportErr)
+		return "", reportErr
 	}
 	defer stdin.Close()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
-		return "", Errorf("error creating stdout pipe: %v", err)
+		reportErr := Errorf("error creating stdout pipe: %v", err)
+		p.setError(reportErr)
+		return "", reportErr
 	}
 	stderr, err := session.StderrPipe()
 	if err != nil {
-		return "", Errorf("error creating stderr pipe: %v", err)
+		reportErr := Errorf("error creating stderr pipe: %v", err)
+		p.setError(reportErr)
+		return "", reportErr
 	}
 
 	outCH := make(chan error, 2)
 	inCH := make(chan error, 1)
 	output := bytes.NewBuffer(nil)
-	expectOutput := newSSHOutput(option.Expect != nil)
+	expectOutput := newSSHOutput(p.expect != nil)
 
 	// build stdout
 	outWriters := []io.Writer{output, expectOutput}
-	if option.Stdout != nil {
-		outWriters = append(outWriters, option.Stdout)
+	if p.stdout != nil {
+		outWriters = append(outWriters, p.stdout)
 	}
 	useStdout := io.MultiWriter(outWriters...)
 
 	// build stderr
-	errWriters := []io.Writer{output, expectOutput}
-	if option.Stderr != nil {
-		errWriters = append(errWriters, option.Stderr)
+	errWriters := []io.Writer{expectOutput}
+	if p.stderr != nil {
+		errWriters = append(errWriters, p.stderr)
 	}
 	useStdErr := io.MultiWriter(errWriters...)
 
 	go func() {
-		if option.Expect != nil {
+		if p.expect != nil {
 			for {
 				outputStr, err := expectOutput.WaitChange()
 				if err != nil {
@@ -195,7 +429,7 @@ func SSH(command string, option *SSHOption) (string, error) {
 					return
 				}
 
-				if input, err := option.Expect(outputStr); err != nil {
+				if input, err := p.expect(outputStr); err != nil {
 					inCH <- err
 					return
 				} else if input != "" {
@@ -222,8 +456,11 @@ func SSH(command string, option *SSHOption) (string, error) {
 		outCH <- err
 	}()
 
-	ColorPrintf("purple", "%s@%s: ", option.User, option.Host)
-	ColorPrintf("blue", "%s\n", command)
+	ColorPrintf("purple", "%s@%s: ", p.user, p.host)
+	ColorPrintf("blue", "%s", command)
+	if p.stdout != nil {
+		ColorPrintf("blue", "\n")
+	}
 
 	retError := session.Run(command)
 
@@ -242,20 +479,35 @@ func SSH(command string, option *SSHOption) (string, error) {
 	if retError != nil {
 		return "", retError
 	} else {
+		if p.stdout == nil {
+			ColorPrintf("green", " ✓\n")
+		}
+
 		return output.String(), nil
 	}
 }
 
-func SCP(localPath string, remotePath string, option *SSHOption) error {
-	if option.User == "" {
+// SCP uploads a file to the SSHClient
+func (p *SSHClient) SCP(localPath string, remotePath string) error {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if p.user == "" {
 		return Errorf("user is empty")
 	}
-	if option.Host == "" {
+	if p.host == "" {
 		return Errorf("host is empty")
 	}
+	if p.port == 0 {
+		p.port = 22
+	}
 
-	if option.Timeout == 0 {
-		option.Timeout = time.Second * 600
+	if p.scpTimeout == 0 {
+		p.scpTimeout = time.Second * 600
+	}
+
+	if strings.HasPrefix(localPath, "~/") {
+		localPath = filepath.Join(os.Getenv("HOME"), localPath[2:])
 	}
 
 	file, err := os.Open(localPath)
@@ -271,27 +523,18 @@ func SCP(localPath string, remotePath string, option *SSHOption) error {
 	fileSize := stat.Size()
 	fileName := filepath.Base(remotePath) // Use the base of remotePath as the filename
 
-	auth := []ssh.AuthMethod{}
-	if option.PrivateKey != "" {
-		signer, err := ssh.ParsePrivateKey([]byte(option.PrivateKey))
-		if err != nil {
-			return Errorf("failed to parse private key: %v", err)
-		}
-		auth = append(auth, ssh.PublicKeys(signer))
-	} else if option.Password != "" {
-		auth = append(auth, ssh.Password(option.Password))
-	} else {
-		return Errorf("password or private key is empty")
-	}
-
-	client, err := ssh.Dial("tcp", net.JoinHostPort(option.Host, option.Port), &ssh.ClientConfig{
-		User:            option.User,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // 在生产环境中不推荐
-		Timeout:         option.Timeout,
-	})
+	client, err := ssh.Dial(
+		"tcp",
+		net.JoinHostPort(p.host, Sprintf("%d", p.port)),
+		&ssh.ClientConfig{
+			User:            p.user,
+			Auth:            p.auth,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         p.scpTimeout,
+		},
+	)
 	if err != nil {
-		return Errorf("failed to dial: %s@%s:22 : %v", option.User, option.Host, err)
+		return Errorf("failed to dial: %s@%s:%d : %v", p.user, p.host, p.port, err)
 	}
 	defer client.Close()
 
@@ -345,7 +588,7 @@ func SCP(localPath string, remotePath string, option *SSHOption) error {
 		}
 
 		// 2. Send file contents with progress tracking
-		progressWriter := &progressWriter{
+		progressWriter := &scpProgressWriter{
 			writer: stdin,
 			total:  fileSize,
 			onProgress: func(current, total int64) {
@@ -391,7 +634,7 @@ func SCP(localPath string, remotePath string, option *SSHOption) error {
 	remoteTargetDir := filepath.Dir(remotePath)
 	cmd := Sprintf("scp -t %s", remoteTargetDir)
 	ColorPrintf("blue", "scp %s ", localPath)
-	ColorPrintf("purple", "%s@%s:", option.User, option.Host)
+	ColorPrintf("purple", "%s@%s:", p.user, p.host)
 	ColorPrintf("blue", "%s\n", remotePath)
 
 	// session.Run() blocks until command finishes.
@@ -413,26 +656,4 @@ func SCP(localPath string, remotePath string, option *SSHOption) error {
 	}
 
 	return nil
-}
-
-// progressWriter wraps an io.Writer and reports progress
-type progressWriter struct {
-	writer     io.Writer
-	total      int64
-	current    int64
-	lastUpdate time.Time
-	onProgress func(current, total int64)
-}
-
-func (pw *progressWriter) Write(p []byte) (int, error) {
-	n, err := pw.writer.Write(p)
-	pw.current += int64(n)
-
-	// Update progress at most 10 times per second to avoid flooding the terminal
-	if time.Since(pw.lastUpdate) > 100*time.Millisecond {
-		pw.onProgress(pw.current, pw.total)
-		pw.lastUpdate = time.Now()
-	}
-
-	return n, err
 }
