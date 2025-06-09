@@ -180,6 +180,21 @@ func (p *SSHClient) getLastError() error {
 	return nil
 }
 
+// GetUser returns the user for the SSHClient
+func (p *SSHClient) GetUser() string {
+	return p.user
+}
+
+// GetHost returns the host for the SSHClient
+func (p *SSHClient) GetHost() string {
+	return p.host
+}
+
+// GetPort returns the port for the SSHClient
+func (p *SSHClient) GetPort() uint16 {
+	return p.port
+}
+
 // SetSSHTempDir sets the temporary directory for the SSHClient
 func (p *SSHClient) SetSSHTempDir(dir string) *SSHClient {
 	p.runMu.Lock()
