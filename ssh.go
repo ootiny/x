@@ -761,7 +761,7 @@ func (p *SSHClient) SCPFile(
 	tmpName := RandFileName(16) + ".tmp"
 	remoteTempPath := filepath.Join(p.sshTempDir, tmpName)
 
-	if err := p.CreateDirectory(filepath.Dir(remotePath), user, group, mode); err != nil {
+	if err := p.CreateDirectory(filepath.Dir(remotePath), user, group, 0755); err != nil {
 		return err
 	} else if err := p.scp(localPath, remoteTempPath); err != nil {
 		return err
