@@ -712,6 +712,44 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 	return nil
 }
 
+func (p *SSHClient) IsDirectoryExists(dirPath string) (bool, error) {
+	if output, err := p.SudoSSH("test -d %s && echo 'yes' || echo 'no'", dirPath); err != nil {
+		return false, err
+	} else if output == "yes" {
+		return true, nil
+	} else {
+		return false, nil
+	}
+}
+func (p *SSHClient) CreateDirectory(dirPath string, user string, group string, mode os.FileMode) error {
+	if exists, err := p.IsDirectoryExists(dirPath); err != nil {
+		return err
+	} else if exists {
+		return nil
+	} else {
+		// create parent directory
+		parentDir := filepath.Dir(dirPath)
+		if existsParent, err := p.IsDirectoryExists(parentDir); err != nil {
+			return err
+		} else if !existsParent {
+			return p.CreateDirectory(parentDir, user, group, mode)
+		} else {
+			Ignore()
+		}
+
+		// create directory
+		if _, err := p.SudoSSH("mkdir -p %s", dirPath); err != nil {
+			return err
+		} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, dirPath); err != nil {
+			return err
+		} else if _, err := p.SudoSSH("chmod %o %s", mode, dirPath); err != nil {
+			return err
+		} else {
+			return nil
+		}
+	}
+}
+
 func (p *SSHClient) SCPFile(
 	localPath string, remotePath string,
 	user string, group string, mode os.FileMode,
@@ -719,24 +757,9 @@ func (p *SSHClient) SCPFile(
 	tmpName := RandFileName(16) + ".tmp"
 	remoteTempPath := filepath.Join(p.sshTempDir, tmpName)
 
-	dir := filepath.Dir(remotePath)
-
-	// test if remote dir exists
-	if output, err := p.SudoSSH("test -d %s && echo 'yes' || echo 'no'", dir); err != nil {
+	if err := p.CreateDirectory(filepath.Dir(remotePath), user, group, mode); err != nil {
 		return err
-	} else if output == "no" {
-		if _, err := p.SudoSSH("mkdir -p %s", dir); err != nil {
-			return err
-		} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, dir); err != nil {
-			return err
-		} else {
-			Ignore()
-		}
-	} else {
-		Ignore()
-	}
-
-	if err := p.scp(localPath, remoteTempPath); err != nil {
+	} else if err := p.scp(localPath, remoteTempPath); err != nil {
 		return err
 	} else if _, err := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); err != nil {
 		return err
