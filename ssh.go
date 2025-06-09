@@ -732,7 +732,11 @@ func (p *SSHClient) CreateDirectory(dirPath string, user string, group string, m
 		if existsParent, err := p.IsDirectoryExists(parentDir); err != nil {
 			return err
 		} else if !existsParent {
-			return p.CreateDirectory(parentDir, user, group, mode)
+			if err := p.CreateDirectory(parentDir, user, group, mode); err != nil {
+				return err
+			} else {
+				Ignore()
+			}
 		} else {
 			Ignore()
 		}
