@@ -801,7 +801,11 @@ func (p *SSHClient) SCPBytes(
 func (p *SSHClient) IsLinuxServiceEnabled(serviceName string) (bool, error) {
 	// Detect if the service is enabled
 	if output, err := p.SudoSSH("systemctl is-enabled %s", serviceName); err != nil {
-		return false, err
+		if strings.TrimSpace(output) == "disabled" {
+			return false, nil
+		} else {
+			return false, err
+		}
 	} else {
 		return strings.TrimSpace(output) == "enabled", nil
 	}
