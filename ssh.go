@@ -448,18 +448,19 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 
 	outCH := make(chan error, 2)
 	inCH := make(chan error, 1)
-	output := bytes.NewBuffer(nil)
+	outBuffer := bytes.NewBuffer(nil)
+	errBuffer := bytes.NewBuffer(nil)
 	expectOutput := newSSHOutput(p.expect != nil)
 
 	// build stdout
-	outWriters := []io.Writer{output, expectOutput}
+	outWriters := []io.Writer{outBuffer, expectOutput}
 	if p.stdout != nil {
 		outWriters = append(outWriters, WrapNewLineWriter(p.stdout))
 	}
 	useStdout := io.MultiWriter(outWriters...)
 
 	// build stderr
-	errWriters := []io.Writer{expectOutput}
+	errWriters := []io.Writer{errBuffer, expectOutput}
 	if p.stderr != nil {
 		errWriters = append(errWriters, WrapNewLineWriter(p.stderr))
 	}
@@ -531,13 +532,13 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	} else {
 		if p.stdout == nil {
 			ColorPrintf("green", "\n✔ ok\n")
-		} else if !strings.HasSuffix(output.String(), "\n") {
+		} else if !strings.HasSuffix(outBuffer.String(), "\n") {
 			Print("\n")
 		} else {
 			Ignore()
 		}
 
-		return strings.TrimSpace(output.String()), nil
+		return strings.TrimSpace(outBuffer.String()), nil
 	}
 }
 
