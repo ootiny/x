@@ -13,6 +13,32 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type ExecResult struct {
+	Stdout string
+	Stderr string
+	Error  error
+}
+
+func (p *ExecResult) IsSuccess() bool {
+	return p.Error == nil
+}
+
+func (p *ExecResult) IsFailure() bool {
+	return p.Error != nil
+}
+
+func (p *ExecResult) StdoutContains(text string) bool {
+	return strings.Contains(p.Stdout, text)
+}
+
+func (p *ExecResult) StderrContains(text string) bool {
+	return strings.Contains(p.Stderr, text)
+}
+
+func (p *ExecResult) Contains(text string) bool {
+	return p.StdoutContains(text) || p.StderrContains(text)
+}
+
 // progressWriter wraps an io.Writer and reports progress
 type scpProgressWriter struct {
 	writer     io.Writer
@@ -378,14 +404,14 @@ func (p *SSHClient) Close() error {
 }
 
 func (p *SSHClient) RemoteHomeDir() (string, error) {
-	if output, err := p.SSH("echo $HOME"); err != nil {
-		return "", err
+	if result := p.SSH("echo $HOME"); result.IsSuccess() {
+		return result.Stdout, nil
 	} else {
-		return output, nil
+		return "", result.Error
 	}
 }
 
-func (p *SSHClient) SudoSSH(format string, args ...any) (string, error) {
+func (p *SSHClient) SudoSSH(format string, args ...any) *ExecResult {
 	if p.user == "root" {
 		return p.ssh(false, format, args...)
 	} else {
@@ -393,23 +419,27 @@ func (p *SSHClient) SudoSSH(format string, args ...any) (string, error) {
 	}
 }
 
-func (p *SSHClient) SSH(format string, args ...any) (string, error) {
+func (p *SSHClient) SSH(format string, args ...any) *ExecResult {
 	return p.ssh(false, format, args...)
 }
 
 // SSH executes a command on the SSHClient
-func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
+func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
 
 	if err := p.getLastError(); err != nil {
-		return "", err
+		return &ExecResult{
+			Error: err,
+		}
 	}
 
 	if p.runClient == nil {
 		reportErr := Errorf("client is not open")
 		p.setError(reportErr)
-		return "", reportErr
+		return &ExecResult{
+			Error: reportErr,
+		}
 	}
 
 	command := Sprintf(format, args...)
@@ -421,7 +451,9 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	if err != nil {
 		reportErr := Errorf("failed to create session: %v", err)
 		p.setError(reportErr)
-		return "", reportErr
+		return &ExecResult{
+			Error: reportErr,
+		}
 	}
 	defer session.Close()
 
@@ -429,7 +461,9 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	if err != nil {
 		reportErr := Errorf("error creating stdin pipe: %v", err)
 		p.setError(reportErr)
-		return "", reportErr
+		return &ExecResult{
+			Error: reportErr,
+		}
 	}
 	defer stdin.Close()
 
@@ -437,13 +471,17 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 	if err != nil {
 		reportErr := Errorf("error creating stdout pipe: %v", err)
 		p.setError(reportErr)
-		return "", reportErr
+		return &ExecResult{
+			Error: reportErr,
+		}
 	}
 	stderr, err := session.StderrPipe()
 	if err != nil {
 		reportErr := Errorf("error creating stderr pipe: %v", err)
 		p.setError(reportErr)
-		return "", reportErr
+		return &ExecResult{
+			Error: reportErr,
+		}
 	}
 
 	outCH := make(chan error, 2)
@@ -528,7 +566,11 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 			Ignore()
 		}
 
-		return "", retError
+		return &ExecResult{
+			Stdout: strings.TrimSpace(outBuffer.String()),
+			Stderr: strings.TrimSpace(errBuffer.String()),
+			Error:  retError,
+		}
 	} else {
 		if p.stdout == nil {
 			ColorPrintf("green", "\n✔ ok\n")
@@ -538,7 +580,11 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) (string, error) {
 			Ignore()
 		}
 
-		return strings.TrimSpace(outBuffer.String()), nil
+		return &ExecResult{
+			Stdout: strings.TrimSpace(outBuffer.String()),
+			Stderr: strings.TrimSpace(errBuffer.String()),
+			Error:  nil,
+		}
 	}
 }
 
@@ -714,14 +760,13 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 }
 
 func (p *SSHClient) IsDirectoryExists(dirPath string) (bool, error) {
-	if output, err := p.SudoSSH("test -d %s && echo 'yes' || echo 'no'", dirPath); err != nil {
-		return false, err
-	} else if output == "yes" {
-		return true, nil
+	if result := p.SudoSSH("test -d %s && echo 'yes' || echo 'no'", dirPath); result.IsSuccess() {
+		return result.Stdout == "yes", nil
 	} else {
-		return false, nil
+		return false, result.Error
 	}
 }
+
 func (p *SSHClient) CreateDirectory(dirPath string, user string, group string, mode os.FileMode) error {
 	if exists, err := p.IsDirectoryExists(dirPath); err != nil {
 		return err
@@ -743,12 +788,12 @@ func (p *SSHClient) CreateDirectory(dirPath string, user string, group string, m
 		}
 
 		// create directory
-		if _, err := p.SudoSSH("mkdir -p %s", dirPath); err != nil {
-			return err
-		} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, dirPath); err != nil {
-			return err
-		} else if _, err := p.SudoSSH("chmod %o %s", mode, dirPath); err != nil {
-			return err
+		if result := p.SudoSSH("mkdir -p %s", dirPath); result.IsFailure() {
+			return result.Error
+		} else if result := p.SudoSSH("chown %s:%s %s", user, group, dirPath); result.IsFailure() {
+			return result.Error
+		} else if result := p.SudoSSH("chmod %o %s", mode, dirPath); result.IsFailure() {
+			return result.Error
 		} else {
 			return nil
 		}
@@ -766,12 +811,12 @@ func (p *SSHClient) SCPFile(
 		return err
 	} else if err := p.scp(localPath, remoteTempPath); err != nil {
 		return err
-	} else if _, err := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); err != nil {
-		return err
-	} else if _, err := p.SudoSSH("chown %s:%s %s", user, group, remotePath); err != nil {
-		return err
-	} else if _, err := p.SudoSSH("chmod %o %s", mode, remotePath); err != nil {
-		return err
+	} else if result := p.SudoSSH("mv %s %s", remoteTempPath, remotePath); result.IsFailure() {
+		return result.Error
+	} else if result := p.SudoSSH("chown %s:%s %s", user, group, remotePath); result.IsFailure() {
+		return result.Error
+	} else if result := p.SudoSSH("chmod %o %s", mode, remotePath); result.IsFailure() {
+		return result.Error
 	} else {
 		return nil
 	}
@@ -800,25 +845,28 @@ func (p *SSHClient) SCPBytes(
 
 // IsLinuxServiceEnabled checks if a service is enabled
 func (p *SSHClient) IsLinuxServiceEnabled(serviceName string) (bool, error) {
-	// Detect if the service is enabled
-	if output, err := p.SudoSSH("systemctl is-enabled %s", serviceName); err != nil {
-		if strings.TrimSpace(output) == "disabled" {
-			return false, nil
-		} else {
-			return false, err
-		}
+	result := p.SudoSSH("systemctl is-enabled %s", serviceName)
+
+	if result.Contains("enabled") {
+		return true, nil
+	} else if result.Contains("disabled") {
+		return false, nil
 	} else {
-		return strings.TrimSpace(output) == "enabled", nil
+		return false, result.Error
 	}
 }
 
 // IsLinuxServiceRunning checks if a service is running
 func (p *SSHClient) IsLinuxServiceRunning(serviceName string) (bool, error) {
+	result := p.SudoSSH("systemctl is-active %s", serviceName)
+
 	// Detect if the service is running
-	if output, err := p.SudoSSH("systemctl is-active %s", serviceName); err != nil {
-		return false, err
+	if result.Contains("active") {
+		return true, nil
+	} else if result.Contains("inactive") {
+		return false, nil
 	} else {
-		return strings.TrimSpace(output) == "active", nil
+		return false, result.Error
 	}
 }
 
@@ -828,8 +876,8 @@ func (p *SSHClient) StopLinuxService(serviceName string) error {
 		return err
 	} else if !running {
 		return nil
-	} else if _, err := p.SudoSSH("systemctl stop %s", serviceName); err != nil {
-		return err
+	} else if result := p.SudoSSH("systemctl stop %s", serviceName); result.IsFailure() {
+		return result.Error
 	} else {
 		return nil
 	}
@@ -841,8 +889,8 @@ func (p *SSHClient) DisableLinuxService(serviceName string) error {
 		return err
 	} else if !enabled {
 		return nil
-	} else if _, err := p.SudoSSH("systemctl disable %s", serviceName); err != nil {
-		return err
+	} else if result := p.SudoSSH("systemctl disable %s", serviceName); result.IsFailure() {
+		return result.Error
 	} else {
 		return nil
 	}
@@ -854,8 +902,8 @@ func (p *SSHClient) EnableLinuxService(serviceName string) error {
 		return err
 	} else if enabled {
 		return nil
-	} else if _, err := p.SudoSSH("systemctl enable %s", serviceName); err != nil {
-		return err
+	} else if result := p.SudoSSH("systemctl enable %s", serviceName); result.IsFailure() {
+		return result.Error
 	} else {
 		return nil
 	}
@@ -867,8 +915,8 @@ func (p *SSHClient) StartLinuxService(serviceName string) error {
 		return err
 	} else if running {
 		return nil
-	} else if _, err := p.SudoSSH("systemctl start %s", serviceName); err != nil {
-		return err
+	} else if result := p.SudoSSH("systemctl start %s", serviceName); result.IsFailure() {
+		return result.Error
 	} else {
 		return nil
 	}
@@ -887,10 +935,10 @@ func (p *SSHClient) DeployLinuxService(
 		}
 	}
 
-	if _, err := p.SudoSSH("systemctl daemon-reload"); err != nil {
-		return err
+	if result := p.SudoSSH("systemctl daemon-reload"); result.IsFailure() {
+		return result.Error
 	} else if err := p.EnableLinuxService(serviceName); err != nil {
-		return err
+		return result.Error
 	} else if err := p.StartLinuxService(serviceName); err != nil {
 		return err
 	} else {
