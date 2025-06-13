@@ -19,19 +19,4 @@ func main() {
 	}
 	defer remote.Close()
 
-	// remote.SetStdout(nil)
-	// remote.SetStderr(nil)
-
-	// if output, err := remote.SudoSSH("pwdd"); err != nil {
-	// 	panic(err)
-	// } else {
-	// 	x.LogInfo(output)
-	// }
-	if err := remote.DisableLinuxService("glight-uclient"); err != nil {
-		panic(err)
-	} else if enabled, err := remote.IsLinuxServiceEnabled("glight-uclient"); err != nil {
-		panic(err)
-	} else {
-		x.LogInfo(enabled)
-	}
 }
