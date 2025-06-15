@@ -350,18 +350,59 @@ func (p *SSHClient) AuthPrivateKey(privateKey string) *SSHClient {
 }
 
 func (p *SSHClient) OpenWithRetry(retry int) error {
-	var err error
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+
+	if retry <= 0 {
+		retry = 1
+	}
+
+	if err := p.getLastError(); err != nil {
+		return err
+	}
+
+	if p.user == "" {
+		reportErr := Errorf("user is empty")
+		p.setError(reportErr)
+		return reportErr
+	}
+	if p.host == "" {
+		reportErr := Errorf("host is empty")
+		p.setError(reportErr)
+		return reportErr
+	}
+	if p.port == 0 {
+		p.port = 22
+	}
+
+	if p.sshTimeout == 0 {
+		p.sshTimeout = time.Second * 60
+	}
+
+	var retError error
 
 	for range retry {
-		if err = p.Open(); err != nil {
+		if client, err := ssh.Dial(
+			"tcp",
+			net.JoinHostPort(p.host, Sprintf("%d", p.port)),
+			&ssh.ClientConfig{
+				User:            p.user,
+				Auth:            p.auth,
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+				Timeout:         p.sshTimeout,
+			},
+		); err != nil {
+			retError = Errorf("failed to dial: %s@%s:%d : %v", p.user, p.host, p.port, err)
 			time.Sleep(time.Second * 1)
 			continue
 		} else {
+			p.runClient = client
 			return nil
 		}
 	}
 
-	return err
+	p.setError(retError)
+	return retError
 }
 
 func (p *SSHClient) Open() error {
