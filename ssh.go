@@ -349,6 +349,21 @@ func (p *SSHClient) AuthPrivateKey(privateKey string) *SSHClient {
 	return p
 }
 
+func (p *SSHClient) OpenWithRetry(retry int) error {
+	var err error
+
+	for range retry {
+		if err = p.Open(); err != nil {
+			time.Sleep(time.Second * 1)
+			continue
+		} else {
+			return nil
+		}
+	}
+
+	return err
+}
+
 func (p *SSHClient) Open() error {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
