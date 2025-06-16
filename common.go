@@ -38,7 +38,7 @@ func Ternary[T any](cond bool, trueValue, falseValue T) T {
 func fnListJsonTasks(efs embed.FS, dir string, subDir string) ([]string, error) {
 	var result []string
 
-	if entries, err := efs.ReadDir(dir); err != nil {
+	if entries, err := efs.ReadDir(dir + "/" + subDir); err != nil {
 		return nil, err
 	} else {
 		for _, entry := range entries {
