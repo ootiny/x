@@ -13,6 +13,16 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+type SSHConfig struct {
+	User         string
+	Host         string
+	Port         uint16
+	Password     string
+	PrivateKey   string
+	SSHTimeoutMS uint32
+	SCPTimeoutMS uint32
+}
+
 type ExecResult struct {
 	stdout string
 	stderr string
@@ -155,14 +165,11 @@ func (p *sshOutput) WaitChange() (string, error) {
 
 // SSHClient is a client for SSH connections
 type SSHClient struct {
+	config     SSHConfig
 	runClient  *ssh.Client
 	expect     func(output string) (string, error)
 	stdout     io.Writer
 	stderr     io.Writer
-	user       string
-	host       string
-	port       uint16
-	password   string
 	sshTimeout time.Duration
 	scpTimeout time.Duration
 	sshTempDir string
@@ -173,15 +180,12 @@ type SSHClient struct {
 }
 
 // NewSSHClient creates a new SSHClient
-func NewSSHClient(user string, host string, password string) *SSHClient {
+func NewSSHClient(config SSHConfig) *SSHClient {
 	ret := &SSHClient{
 		expect:     nil,
 		stdout:     os.Stdout,
 		stderr:     os.Stderr,
-		user:       user,
-		host:       host,
-		port:       22,
-		password:   password,
+		config:     config,
 		sshTimeout: time.Second * 60,
 		scpTimeout: time.Second * 600,
 		sshTempDir: "/tmp",
@@ -191,8 +195,24 @@ func NewSSHClient(user string, host string, password string) *SSHClient {
 		errors:     []error{},
 	}
 
-	if password != "" {
-		ret.auth = append(ret.auth, ssh.Password(password))
+	if ret.config.Port == 0 {
+		ret.config.Port = 22
+	}
+
+	if ret.config.Password != "" {
+		ret.auth = append(ret.auth, ssh.Password(ret.config.Password))
+	}
+
+	if ret.config.PrivateKey != "" {
+		ret.AuthPrivateKey(ret.config.PrivateKey)
+	}
+
+	if ret.config.SSHTimeoutMS > 0 {
+		ret.sshTimeout = time.Duration(ret.config.SSHTimeoutMS) * time.Millisecond
+	}
+
+	if ret.config.SCPTimeoutMS > 0 {
+		ret.scpTimeout = time.Duration(ret.config.SCPTimeoutMS) * time.Millisecond
 	}
 
 	return ret
@@ -216,17 +236,17 @@ func (p *SSHClient) getLastError() error {
 
 // GetUser returns the user for the SSHClient
 func (p *SSHClient) GetUser() string {
-	return p.user
+	return p.config.User
 }
 
 // GetHost returns the host for the SSHClient
 func (p *SSHClient) GetHost() string {
-	return p.host
+	return p.config.Host
 }
 
 // GetPort returns the port for the SSHClient
 func (p *SSHClient) GetPort() uint16 {
-	return p.port
+	return p.config.Port
 }
 
 // SetSSHTempDir sets the temporary directory for the SSHClient
@@ -234,19 +254,6 @@ func (p *SSHClient) SetSSHTempDir(dir string) *SSHClient {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
 	p.sshTempDir = dir
-	return p
-}
-
-// SetPort sets the port for the SSHClient
-func (p *SSHClient) SetPort(port uint16) *SSHClient {
-	p.runMu.Lock()
-	defer p.runMu.Unlock()
-
-	if p.runClient != nil {
-		panic("client is already open")
-	}
-
-	p.port = port
 	return p
 }
 
@@ -361,22 +368,15 @@ func (p *SSHClient) OpenWithRetry(retry int) error {
 		return err
 	}
 
-	if p.user == "" {
+	if p.config.User == "" {
 		reportErr := Errorf("user is empty")
 		p.setError(reportErr)
 		return reportErr
 	}
-	if p.host == "" {
+	if p.config.Host == "" {
 		reportErr := Errorf("host is empty")
 		p.setError(reportErr)
 		return reportErr
-	}
-	if p.port == 0 {
-		p.port = 22
-	}
-
-	if p.sshTimeout == 0 {
-		p.sshTimeout = time.Second * 60
 	}
 
 	var retError error
@@ -384,15 +384,15 @@ func (p *SSHClient) OpenWithRetry(retry int) error {
 	for range retry {
 		if client, err := ssh.Dial(
 			"tcp",
-			net.JoinHostPort(p.host, Sprintf("%d", p.port)),
+			net.JoinHostPort(p.config.Host, Sprintf("%d", p.config.Port)),
 			&ssh.ClientConfig{
-				User:            p.user,
+				User:            p.config.User,
 				Auth:            p.auth,
 				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 				Timeout:         p.sshTimeout,
 			},
 		); err != nil {
-			retError = Errorf("failed to dial: %s@%s:%d : %v", p.user, p.host, p.port, err)
+			retError = Errorf("failed to dial: %s@%s:%d : %v", p.config.User, p.config.Host, p.config.Port, err)
 			time.Sleep(time.Second * 1)
 			continue
 		} else {
@@ -413,35 +413,28 @@ func (p *SSHClient) Open() error {
 		return err
 	}
 
-	if p.user == "" {
+	if p.config.User == "" {
 		reportErr := Errorf("user is empty")
 		p.setError(reportErr)
 		return reportErr
 	}
-	if p.host == "" {
+	if p.config.Host == "" {
 		reportErr := Errorf("host is empty")
 		p.setError(reportErr)
 		return reportErr
 	}
-	if p.port == 0 {
-		p.port = 22
-	}
-
-	if p.sshTimeout == 0 {
-		p.sshTimeout = time.Second * 60
-	}
 
 	if client, err := ssh.Dial(
 		"tcp",
-		net.JoinHostPort(p.host, Sprintf("%d", p.port)),
+		net.JoinHostPort(p.config.Host, Sprintf("%d", p.config.Port)),
 		&ssh.ClientConfig{
-			User:            p.user,
+			User:            p.config.User,
 			Auth:            p.auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Timeout:         p.sshTimeout,
 		},
 	); err != nil {
-		reportErr := Errorf("failed to dial: %s@%s:%d : %v", p.user, p.host, p.port, err)
+		reportErr := Errorf("failed to dial: %s@%s:%d : %v", p.config.User, p.config.Host, p.config.Port, err)
 		p.setError(reportErr)
 		return reportErr
 	} else {
@@ -476,7 +469,7 @@ func (p *SSHClient) RemoteHomeDir() (string, error) {
 }
 
 func (p *SSHClient) SudoSSH(format string, args ...any) *ExecResult {
-	if p.user == "root" {
+	if p.config.User == "root" {
 		return p.ssh(false, format, args...)
 	} else {
 		return p.ssh(true, format, args...)
@@ -604,7 +597,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 		outCH <- err
 	}()
 
-	ColorPrintf("purple", "%s@%s: ", p.user, p.host)
+	ColorPrintf("purple", "%s@%s: ", p.config.User, p.config.Host)
 	ColorPrintf("blue", "%s", command)
 
 	retError := session.Run(command)
@@ -657,18 +650,11 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
 
-	if p.user == "" {
+	if p.config.User == "" {
 		return Errorf("user is empty")
 	}
-	if p.host == "" {
+	if p.config.Host == "" {
 		return Errorf("host is empty")
-	}
-	if p.port == 0 {
-		p.port = 22
-	}
-
-	if p.scpTimeout == 0 {
-		p.scpTimeout = time.Second * 600
 	}
 
 	if strings.HasPrefix(localPath, "~/") {
@@ -690,16 +676,16 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 
 	client, err := ssh.Dial(
 		"tcp",
-		net.JoinHostPort(p.host, Sprintf("%d", p.port)),
+		net.JoinHostPort(p.config.Host, Sprintf("%d", p.config.Port)),
 		&ssh.ClientConfig{
-			User:            p.user,
+			User:            p.config.User,
 			Auth:            p.auth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Timeout:         p.scpTimeout,
 		},
 	)
 	if err != nil {
-		return Errorf("failed to dial: %s@%s:%d : %v", p.user, p.host, p.port, err)
+		return Errorf("failed to dial: %s@%s:%d : %v", p.config.User, p.config.Host, p.config.Port, err)
 	}
 	defer client.Close()
 
@@ -799,7 +785,7 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 	remoteTargetDir := filepath.Dir(remotePath)
 	cmd := Sprintf("scp -t %s", remoteTargetDir)
 	ColorPrintf("blue", "scp %s ", localPath)
-	ColorPrintf("purple", "%s@%s:", p.user, p.host)
+	ColorPrintf("purple", "%s@%s:", p.config.User, p.config.Host)
 	ColorPrintf("blue", "%s\n", remotePath)
 
 	// session.Run() blocks until command finishes.
