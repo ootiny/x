@@ -994,3 +994,15 @@ func (p *SSHClient) DeployLinuxService(
 		return nil
 	}
 }
+
+func (p *SSHClient) GetLinuxArch() (string, error) {
+	if result := p.SSH("uname -m"); result.IsFailure() {
+		return "", result.Error()
+	} else if result.StdoutContains("aarch64") || result.StdoutContains("arm64") {
+		return "arm64", nil
+	} else if result.StdoutContains("x86_64") || result.StdoutContains("amd64") {
+		return "amd64", nil
+	} else {
+		return "", Errorf("unsupported platform: %s", result.Stdout())
+	}
+}
