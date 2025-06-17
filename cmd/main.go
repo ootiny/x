@@ -15,5 +15,5 @@ func main() {
 
 	defer remote.Close()
 
-	remote.SSH("ls -l")
+	remote.SSH("pwd")
 }
