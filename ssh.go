@@ -986,8 +986,12 @@ func (p *SSHClient) DeployLinuxService(
 
 	if result := p.SudoSSH("systemctl daemon-reload"); result.IsFailure() {
 		return result.Error()
+	} else if err := p.DisableLinuxService(serviceName); err != nil {
+		return result.Error()
 	} else if err := p.EnableLinuxService(serviceName); err != nil {
 		return result.Error()
+	} else if err := p.StopLinuxService(serviceName); err != nil {
+		return err
 	} else if err := p.StartLinuxService(serviceName); err != nil {
 		return err
 	} else {
