@@ -1,30 +1,41 @@
 package x
 
 import (
-	"embed"
-	"net"
 	"strings"
-	"time"
 )
 
-func WaitForTCP(network string, ip string, port uint16, timeout time.Duration) bool {
-	deadLine := time.Now().Add(timeout)
+type ExecResult struct {
+	stdout string
+	stderr string
+	err    error
+}
 
-	for time.Now().Before(deadLine) {
-		ColorPrintf("blue", "Waiting for %s %s:%d", network, ip, port)
-		conn, err := net.DialTimeout(network, Sprintf("%s:%d", ip, port), time.Second*3)
-		if err != nil {
-			ColorPrintf("blue", " ...\n")
-			time.Sleep(time.Second)
-			continue
-		} else {
-			ColorPrintf("green", " OK\n")
-			conn.Close()
-			return true
-		}
-	}
+func (p *ExecResult) IsSuccess() bool {
+	return p.err == nil
+}
 
-	return false
+func (p *ExecResult) IsFailure() bool {
+	return p.err != nil
+}
+
+func (p *ExecResult) StdoutContains(text string) bool {
+	return strings.Contains(p.stdout, text)
+}
+
+func (p *ExecResult) StderrContains(text string) bool {
+	return strings.Contains(p.stderr, text)
+}
+
+func (p *ExecResult) Stdout() string {
+	return p.stdout
+}
+
+func (p *ExecResult) Stderr() string {
+	return p.stderr
+}
+
+func (p *ExecResult) Error() error {
+	return p.err
 }
 
 func Ternary[T any](cond bool, trueValue, falseValue T) T {
@@ -33,31 +44,4 @@ func Ternary[T any](cond bool, trueValue, falseValue T) T {
 	} else {
 		return falseValue
 	}
-}
-
-func fnListJsonTasks(efs embed.FS, dir string, subDir string) ([]string, error) {
-	var result []string
-
-	if entries, err := efs.ReadDir(Ternary(subDir == "", dir, dir+"/"+subDir)); err != nil {
-		return nil, err
-	} else {
-		for _, entry := range entries {
-			subPath := Ternary(subDir == "", entry.Name(), subDir+"/"+entry.Name())
-			if entry.IsDir() {
-				if subFiles, err := fnListJsonTasks(efs, dir, subPath); err != nil {
-					return nil, err
-				} else {
-					result = append(result, subFiles...)
-				}
-			} else if strings.HasSuffix(entry.Name(), ".json") {
-				result = append(result, strings.TrimSuffix(subPath, ".json"))
-			}
-		}
-
-		return result, nil
-	}
-}
-
-func ListJsonTasks(efs embed.FS, dir string) ([]string, error) {
-	return fnListJsonTasks(efs, dir, "")
 }
