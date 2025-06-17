@@ -129,6 +129,40 @@ func (p *sshOutput) WaitChange() (string, error) {
 	}
 }
 
+type SSHResult struct {
+	stdout string
+	stderr string
+	err    error
+}
+
+func (p *SSHResult) IsSuccess() bool {
+	return p.err == nil
+}
+
+func (p *SSHResult) IsFailure() bool {
+	return p.err != nil
+}
+
+func (p *SSHResult) StdoutContains(text string) bool {
+	return strings.Contains(p.stdout, text)
+}
+
+func (p *SSHResult) StderrContains(text string) bool {
+	return strings.Contains(p.stderr, text)
+}
+
+func (p *SSHResult) Stdout() string {
+	return p.stdout
+}
+
+func (p *SSHResult) Stderr() string {
+	return p.stderr
+}
+
+func (p *SSHResult) Error() error {
+	return p.err
+}
+
 // SSHClient is a client for SSH connections
 type SSHClient struct {
 	config     SSHConfig
@@ -434,7 +468,7 @@ func (p *SSHClient) RemoteHomeDir() (string, error) {
 	}
 }
 
-func (p *SSHClient) SudoSSH(format string, args ...any) *ExecResult {
+func (p *SSHClient) SudoSSH(format string, args ...any) *SSHResult {
 	if p.config.User == "root" {
 		return p.ssh(false, format, args...)
 	} else {
@@ -442,17 +476,17 @@ func (p *SSHClient) SudoSSH(format string, args ...any) *ExecResult {
 	}
 }
 
-func (p *SSHClient) SSH(format string, args ...any) *ExecResult {
+func (p *SSHClient) SSH(format string, args ...any) *SSHResult {
 	return p.ssh(false, format, args...)
 }
 
 // SSH executes a command on the SSHClient
-func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
+func (p *SSHClient) ssh(sudo bool, format string, args ...any) *SSHResult {
 	p.runMu.Lock()
 	defer p.runMu.Unlock()
 
 	if err := p.getLastError(); err != nil {
-		return &ExecResult{
+		return &SSHResult{
 			err: err,
 		}
 	}
@@ -460,7 +494,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 	if p.runClient == nil {
 		reportErr := Errorf("client is not open")
 		p.setError(reportErr)
-		return &ExecResult{
+		return &SSHResult{
 			err: reportErr,
 		}
 	}
@@ -474,7 +508,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 	if err != nil {
 		reportErr := Errorf("failed to create session: %v", err)
 		p.setError(reportErr)
-		return &ExecResult{
+		return &SSHResult{
 			err: reportErr,
 		}
 	}
@@ -484,7 +518,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 	if err != nil {
 		reportErr := Errorf("error creating stdin pipe: %v", err)
 		p.setError(reportErr)
-		return &ExecResult{
+		return &SSHResult{
 			err: reportErr,
 		}
 	}
@@ -494,7 +528,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 	if err != nil {
 		reportErr := Errorf("error creating stdout pipe: %v", err)
 		p.setError(reportErr)
-		return &ExecResult{
+		return &SSHResult{
 			err: reportErr,
 		}
 	}
@@ -502,7 +536,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 	if err != nil {
 		reportErr := Errorf("error creating stderr pipe: %v", err)
 		p.setError(reportErr)
-		return &ExecResult{
+		return &SSHResult{
 			err: reportErr,
 		}
 	}
@@ -589,7 +623,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 			Ignore()
 		}
 
-		return &ExecResult{
+		return &SSHResult{
 			stdout: strings.TrimSpace(outBuffer.String()),
 			stderr: strings.TrimSpace(errBuffer.String()),
 			err:    retError,
@@ -603,7 +637,7 @@ func (p *SSHClient) ssh(sudo bool, format string, args ...any) *ExecResult {
 			Ignore()
 		}
 
-		return &ExecResult{
+		return &SSHResult{
 			stdout: strings.TrimSpace(outBuffer.String()),
 			stderr: strings.TrimSpace(errBuffer.String()),
 			err:    nil,
