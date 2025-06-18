@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-func IsFileExists(efs embed.FS, path string) bool {
+func IsFileExists(efs *embed.FS, path string) bool {
 	_, err := efs.ReadFile(path)
 	return err == nil
 }
 
-func fnListJsonTasks(efs embed.FS, dir string, subDir string) ([]string, error) {
+func fnListJsonTasks(efs *embed.FS, dir string, subDir string) ([]string, error) {
 	var result []string
 
 	if entries, err := efs.ReadDir(Ternary(subDir == "", dir, dir+"/"+subDir)); err != nil {
@@ -35,12 +35,12 @@ func fnListJsonTasks(efs embed.FS, dir string, subDir string) ([]string, error) 
 	}
 }
 
-func ListJsonTasks(efs embed.FS, dir string) ([]string, error) {
+func ListJsonTasks(efs *embed.FS, dir string) ([]string, error) {
 	return fnListJsonTasks(efs, dir, "")
 }
 
 func LoadTaskConfig(
-	efs embed.FS, efsPath string,
+	efs *embed.FS, efsPath string,
 	config any, taskName string, overrideConfig string) error {
 	taskJSON, err := efs.ReadFile(efsPath + taskName + ".json")
 	if err != nil {
