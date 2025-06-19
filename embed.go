@@ -52,10 +52,10 @@ func LoadTaskConfig(
 		taskJSON, err = os.ReadFile(taskName)
 	} else if efs == nil {
 		return Errorf("task %s: not found", taskName)
-	} else if !IsFileExists(efs, taskName+".json") {
+	} else if !IsFileExists(efs, "assets/tasks/"+taskName+".json") {
 		return Errorf(`task "%s" not found`, taskName)
 	} else {
-		taskJSON, err = efs.ReadFile(taskName + ".json")
+		taskJSON, err = efs.ReadFile("assets/tasks/" + taskName + ".json")
 	}
 
 	if err != nil {
