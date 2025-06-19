@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"maps"
+	"os"
 	"strings"
 )
 
@@ -40,9 +41,23 @@ func ListJsonTasks(efs *embed.FS, dir string) ([]string, error) {
 }
 
 func LoadTaskConfig(
-	efs *embed.FS, efsPath string,
-	config any, taskName string, overrideConfig string) error {
-	taskJSON, err := efs.ReadFile(efsPath + taskName + ".json")
+	config any,
+	efs *embed.FS,
+	taskName string,
+	overrideConfig map[string]any,
+) error {
+	var taskJSON []byte
+	var err error
+	if strings.HasSuffix(taskName, ".json") {
+		taskJSON, err = os.ReadFile(taskName)
+	} else if efs == nil {
+		return Errorf("task %s: not found", taskName)
+	} else if !IsFileExists(efs, taskName+".json") {
+		return Errorf(`task "%s" not found`, taskName)
+	} else {
+		taskJSON, err = efs.ReadFile(taskName + ".json")
+	}
+
 	if err != nil {
 		return err
 	}
@@ -52,14 +67,7 @@ func LoadTaskConfig(
 		return Errorf(`task %s: failed to unmarshal base config: %v`, taskName, err)
 	}
 
-	overrideConfigMap := map[string]any{}
-	if overrideConfig != "" {
-		if err := json.Unmarshal([]byte(overrideConfig), &overrideConfigMap); err != nil {
-			return Errorf(`task %s: failed to unmarshal override config: %v`, taskName, err)
-		}
-	}
-
-	maps.Copy(baseConfig, overrideConfigMap)
+	maps.Copy(baseConfig, overrideConfig)
 
 	if mergedConfig, err := json.Marshal(baseConfig); err != nil {
 		return Errorf(`task %s: failed to marshal merged config: %v`, taskName, err)
