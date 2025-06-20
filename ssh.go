@@ -910,7 +910,7 @@ func (p *SSHClient) IsLinuxServiceEnabled(serviceName string) (bool, error) {
 func (p *SSHClient) IsLinuxServiceRunning(serviceName string) (bool, error) {
 	result := p.SudoSSH("systemctl is-active %s", serviceName)
 
-	if result.StdoutContains("inactive") {
+	if result.StdoutContains("inactive") || result.StdoutContains("failed") {
 		return false, nil
 	} else if result.StdoutContains("active") {
 		return true, nil
