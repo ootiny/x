@@ -7,9 +7,9 @@ import (
 )
 
 type HttpResponse struct {
-	Data    any    `json:"data,omitempty"`    // Data is the data of the response
-	Code    int    `json:"code,omitempty"`    // Code equals 0 means no error, otherwise means error
-	Message string `json:"message,omitempty"` // Message is the detail of the error or the success message
+	Data    any    `json:"data"`    // Data is the data of the response
+	Code    int    `json:"code"`    // Code equals 0 means no error, otherwise means error
+	Message string `json:"message"` // Message is the detail of the error or the success message
 }
 
 func GinReturnOK(c *gin.Context, data any) {
