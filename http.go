@@ -1,6 +1,7 @@
 package x
 
 import (
+	"bytes"
 	"compress/gzip"
 	"compress/zlib"
 	"context"
@@ -72,12 +73,17 @@ func DoRequest(
 	ctx context.Context,
 	client *http.Client,
 	method HttpMethod,
-	urlStr string,
+	url string,
 	headers map[string]string,
 	cookies map[string]string,
-	data io.Reader,
+	body []byte,
 	timeout time.Duration,
 ) ([]byte, int, error) {
+
+	var data io.Reader = nil
+	if body != nil {
+		data = bytes.NewReader(body)
+	}
 
 	// Add timeout control (if timeout > 0)
 	reqCtx := ctx
@@ -98,20 +104,16 @@ func DoRequest(
 	}
 
 	// Create request with context
-	req, err := http.NewRequestWithContext(reqCtx, string(method), urlStr, data)
+	req, err := http.NewRequestWithContext(reqCtx, string(method), url, data)
 	if err != nil {
 		// Use http.StatusInternalServerError for internal errors
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// --- Request Setup ---
-
-	// Set Accept-Encoding header to indicate supported compression formats.
-	// The standard http.Transport handles gzip automatically if not disabled,
-	// but explicitly setting this ensures we signal support for others too.
+	// Set Accept-Encoding header to indicate support for compression
 	req.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 
-	// Add custom headers (allows overriding Accept-Encoding if provided in headers map)
+	// Add headers
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
@@ -126,8 +128,6 @@ func DoRequest(
 
 	// Set default Content-Type if not provided and body exists
 	if data != nil && req.Header.Get("Content-Type") == "" {
-		// Consider application/octet-stream or requiring Content-Type if data exists?
-		// Sticking with application/json as per original code for now.
 		req.Header.Set("Content-Type", "application/json")
 	}
 
