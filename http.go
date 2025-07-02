@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -32,37 +30,6 @@ const (
 	HttpMethodCONNECT HttpMethod = "CONNECT"
 	HttpMethodTRACE   HttpMethod = "TRACE"
 )
-
-func AddCookies(client *http.Client, targetURL string, cookies []*http.Cookie) error {
-	// Validate inputs
-	if client == nil {
-		return fmt.Errorf("http client cannot be nil")
-	}
-
-	if len(cookies) == 0 {
-		return nil // Nothing to do
-	}
-
-	// Parse URL string
-	cookieURL, err := url.Parse(targetURL)
-	if err != nil {
-		return fmt.Errorf("failed to parse URL: %w", err)
-	}
-
-	// If the client doesn't have a jar, create one
-	if client.Jar == nil {
-		jar, err := cookiejar.New(nil)
-		if err != nil {
-			return fmt.Errorf("failed to create cookie jar: %w", err)
-		}
-		client.Jar = jar
-	}
-
-	// Set the cookies in the client.jar
-	client.Jar.SetCookies(cookieURL, cookies)
-
-	return nil
-}
 
 func FetchJson(
 	method HttpMethod,
@@ -248,9 +215,4 @@ func DownloadFile(ctx context.Context, urlStr string, timeout time.Duration) ([]
 	}
 
 	return respBytes, nil
-}
-
-func GetURLBody(urlStr string) string {
-	ret, _ := DownloadFile(context.Background(), urlStr, time.Minute)
-	return string(ret)
 }
