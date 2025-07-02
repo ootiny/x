@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,6 +62,29 @@ func AddCookies(client *http.Client, targetURL string, cookies []*http.Cookie) e
 	client.Jar.SetCookies(cookieURL, cookies)
 
 	return nil
+}
+
+func FetchJson(
+	method HttpMethod,
+	url string,
+	headers map[string]string,
+	cookies map[string]string,
+	body []byte,
+	timeout time.Duration,
+	val any,
+) error {
+	// create a new http client
+	client := &http.Client{}
+	defer client.CloseIdleConnections()
+
+	if bodyBytes, _, err := DoRequest(
+		context.Background(), client, method, url,
+		headers, cookies, body, timeout,
+	); err != nil {
+		return err
+	} else {
+		return json.Unmarshal(bodyBytes, val)
+	}
 }
 
 // DoRequest sends an HTTP request with given parameters, supports common compression
