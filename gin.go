@@ -12,7 +12,7 @@ type HttpResponse struct {
 	Message string `json:"message,omitempty"` // Message is the detail of the error or the success message
 }
 
-func GinReturnOK(c *gin.Context, data map[string]any) {
+func GinReturnOK(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, HttpResponse{
 		Code: 0,
 		Data: data,
