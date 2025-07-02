@@ -36,7 +36,7 @@ func FetchJson(
 	url string,
 	headers map[string]string,
 	cookies map[string]string,
-	body []byte,
+	body any,
 	timeout time.Duration,
 	val any,
 ) error {
@@ -44,9 +44,14 @@ func FetchJson(
 	client := &http.Client{}
 	defer client.CloseIdleConnections()
 
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
 	if bodyBytes, _, err := DoRequest(
 		context.Background(), client, method, url,
-		headers, cookies, body, timeout,
+		headers, cookies, bodyBytes, timeout,
 	); err != nil {
 		return err
 	} else {
