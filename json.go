@@ -69,7 +69,7 @@ func ToUint(obj any) (uint, error) {
 	}
 }
 
-func ToUInt64(obj any) (uint64, error) {
+func ToUint64(obj any) (uint64, error) {
 	if v, ok := obj.(uint64); ok {
 		return v, nil
 	} else {
@@ -77,7 +77,7 @@ func ToUInt64(obj any) (uint64, error) {
 	}
 }
 
-func ToUInt32(obj any) (uint32, error) {
+func ToUint32(obj any) (uint32, error) {
 	if v, ok := obj.(uint32); ok {
 		return v, nil
 	} else {
@@ -85,7 +85,7 @@ func ToUInt32(obj any) (uint32, error) {
 	}
 }
 
-func ToUInt16(obj any) (uint16, error) {
+func ToUint16(obj any) (uint16, error) {
 	if v, ok := obj.(uint16); ok {
 		return v, nil
 	} else {
@@ -93,7 +93,7 @@ func ToUInt16(obj any) (uint16, error) {
 	}
 }
 
-func ToUInt8(obj any) (uint8, error) {
+func ToUint8(obj any) (uint8, error) {
 	if v, ok := obj.(uint8); ok {
 		return v, nil
 	} else {
@@ -283,35 +283,35 @@ func JsonPath_ToUint(obj any, jPath string) (uint, error) {
 	}
 }
 
-func JsonPath_ToUInt64(obj any, jPath string) (uint64, error) {
+func JsonPath_ToUint64(obj any, jPath string) (uint64, error) {
 	if v, err := JsonPath(obj, jPath); err != nil {
 		return 0, err
 	} else {
-		return ToUInt64(v)
+		return ToUint64(v)
 	}
 }
 
-func JsonPath_ToUInt32(obj any, jPath string) (uint32, error) {
+func JsonPath_ToUint32(obj any, jPath string) (uint32, error) {
 	if v, err := JsonPath(obj, jPath); err != nil {
 		return 0, err
 	} else {
-		return ToUInt32(v)
+		return ToUint32(v)
 	}
 }
 
-func JsonPath_ToUInt16(obj any, jPath string) (uint16, error) {
+func JsonPath_ToUint16(obj any, jPath string) (uint16, error) {
 	if v, err := JsonPath(obj, jPath); err != nil {
 		return 0, err
 	} else {
-		return ToUInt16(v)
+		return ToUint16(v)
 	}
 }
 
-func JsonPath_ToUInt8(obj any, jPath string) (uint8, error) {
+func JsonPath_ToUint8(obj any, jPath string) (uint8, error) {
 	if v, err := JsonPath(obj, jPath); err != nil {
 		return 0, err
 	} else {
-		return ToUInt8(v)
+		return ToUint8(v)
 	}
 }
 
