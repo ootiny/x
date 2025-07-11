@@ -3,7 +3,6 @@ package x
 import (
 	"embed"
 	"encoding/json"
-	"maps"
 	"os"
 	"strings"
 )
@@ -40,6 +39,20 @@ func ListJsonTasks(efs *embed.FS, dir string) ([]string, error) {
 	return fnListJsonTasks(efs, dir, "")
 }
 
+func mergeConfig(dst, src map[string]any) {
+	for k, v := range src {
+		if vMap, ok := v.(map[string]any); ok {
+			if dstMap, ok := dst[k].(map[string]any); ok {
+				mergeConfig(dstMap, vMap)
+			} else {
+				dst[k] = vMap
+			}
+		} else {
+			dst[k] = v
+		}
+	}
+}
+
 func LoadTaskConfig(
 	config any,
 	efs *embed.FS,
@@ -67,7 +80,8 @@ func LoadTaskConfig(
 		return Errorf(`task %s: failed to unmarshal base config: %v`, taskName, err)
 	}
 
-	maps.Copy(baseConfig, overrideConfig)
+	// 递归覆盖 baseConfig
+	mergeConfig(baseConfig, overrideConfig)
 
 	if mergedConfig, err := json.Marshal(baseConfig); err != nil {
 		return Errorf(`task %s: failed to marshal merged config: %v`, taskName, err)
