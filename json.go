@@ -156,14 +156,12 @@ func JsonPath_ToStringArray(obj any, jPath string) ([]string, error) {
 }
 
 func JsonPath_ToStringMap(obj any, jPath string) (map[string]string, error) {
-	if mapObj, err := JsonPath(obj, jPath); err != nil {
-		return nil, err
-	} else if mapRaw, err := ToJsonMap(mapObj); err != nil {
+	if mapObj, err := JsonPath_ToMap(obj, jPath); err != nil {
 		return nil, err
 	} else {
 		ret := make(map[string]string)
 
-		for k, v := range mapRaw {
+		for k, v := range mapObj {
 			if s, err := ToString(v); err != nil {
 				return nil, err
 			} else {
@@ -172,5 +170,15 @@ func JsonPath_ToStringMap(obj any, jPath string) (map[string]string, error) {
 		}
 
 		return ret, nil
+	}
+}
+
+func JsonPath_ToMap(obj any, jPath string) (map[string]any, error) {
+	if mapObj, err := JsonPath(obj, jPath); err != nil {
+		return nil, err
+	} else if mapRaw, err := ToJsonMap(mapObj); err != nil {
+		return nil, err
+	} else {
+		return mapRaw, nil
 	}
 }
