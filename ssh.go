@@ -809,6 +809,14 @@ func (p *SSHClient) scp(localPath string, remotePath string) error {
 	return nil
 }
 
+func (p *SSHClient) IsFileExists(filePath string) (bool, error) {
+	if result := p.SudoSSH("test -f %s && echo 'yes' || echo 'no'", filePath); result.IsSuccess() {
+		return result.Stdout() == "yes", nil
+	} else {
+		return false, result.Error()
+	}
+}
+
 func (p *SSHClient) IsDirectoryExists(dirPath string) (bool, error) {
 	if result := p.SudoSSH("test -d %s && echo 'yes' || echo 'no'", dirPath); result.IsSuccess() {
 		return result.Stdout() == "yes", nil
